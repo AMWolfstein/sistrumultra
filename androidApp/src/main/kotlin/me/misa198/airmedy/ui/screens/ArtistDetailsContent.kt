@@ -47,6 +47,7 @@ internal fun ArtistDetailsContent(
     onPlayNext: (List<String>) -> Unit = {},
     onAddToQueue: (List<String>) -> Unit = {},
     onTrackContextBottomSheet: (TrackContextBottomSheetRequest) -> Unit = {},
+    onAddArtistImage: () -> Unit = {},
     onAlbumClick: (LibraryAlbum) -> Unit = {},
     playbackQueue: PlaybackQueueSnapshot = PlaybackQueueSnapshot(),
 ) {
@@ -75,6 +76,7 @@ internal fun ArtistDetailsContent(
                     onPlayNext = onPlayNext,
                     onAddToQueue = onAddToQueue,
                     onBottomSheetRequested = onTrackContextBottomSheet,
+                    onAddArtistImage = onAddArtistImage,
                     addToPlaylistOnly = true,
                     hazeState = hazeState,
                     playbackQueue = playbackQueue,
@@ -113,6 +115,7 @@ internal fun ArtistDetailsContent(
                 title = album.title,
                 artist = album.artist.ifBlank { stringResource(R.string.album_unknown_artist) },
                 artworkPath = album.artworkPath,
+                audioPath = album.audioPath,
                 onClick = { onAlbumClick(album) },
             )
             InsetListDivider(Modifier.testTag(ArtistAlbumDividerTag))
