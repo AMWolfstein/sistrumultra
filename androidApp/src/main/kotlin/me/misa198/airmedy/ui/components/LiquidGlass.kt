@@ -16,14 +16,14 @@ import me.misa198.airmedy.ui.theme.AirmedyColors
 fun Modifier.liquidGlassBackground(
     hazeState: HazeState?,
     colors: AirmedyColors,
-    hazeBlurRadius: Dp = 16.dp,
+    hazeInputScale: HazeInputScale = HazeInputScale.Fixed(0.20f),
+    hazeBlurRadius: Dp = 12.dp,
     glassTint: Color? = null,
 ): Modifier = if (hazeState == null) {
     background(colors.glassOpaque)
 } else {
     hazeEffect(hazeState) {
-        // Downsampling makes small glass surfaces look pixelated after upscaling.
-        inputScale = HazeInputScale.None
+        inputScale = hazeInputScale
         blurEffect {
             blurRadius = hazeBlurRadius
             colorEffects = listOf(HazeColorEffect.tint(glassTint ?: colors.glass))
