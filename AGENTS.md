@@ -41,7 +41,9 @@ androidApp (Android Compose UI, ViewModels, navigation, Android adapters)
 - Android audio playback is an `androidApp` native adapter: FFmpeg performs
   demux/decode and AAudio receives float PCM. Do not add a Media3/MediaCodec
   decoder fallback unless a task explicitly changes that policy. Build its
-  generated Android libraries first with `bash ../scripts/build-ffmpeg-android.sh arm64-v8a`.
+  generated Android libraries first with `bash ../scripts/build-ffmpeg-android.sh arm64-v8a`
+  (use `armeabi-v7a` or `all` for 32-bit/multi-ABI). Release APKs are assembled per ABI with
+  `./gradlew :androidApp:assembleProdRelease -Pabi=arm64-v8a|armeabi-v7a|universal`.
 
 ## Mobile UI philosophy
 
@@ -96,7 +98,11 @@ intent using native Android Compose.
 - Use the Gradle version catalog in `gradle/libs.versions.toml`; do not hardcode
   dependency or plugin versions in module build files.
 - Keep the existing Android SDK policy unless a task explicitly changes it:
-  `minSdk 31`, `compileSdk 36`, and `targetSdk 36`.
+  `minSdk 26`, `compileSdk 36`, and `targetSdk 36`. True backdrop blur and the
+  `RenderEffect` path require API 31; on API 26–30 and in reduced-transparency
+  mode the shell supplies no Haze state, so glass surfaces must stay legible
+  with their opaque fallback and decorative motion is suppressed via
+  `LocalReduceMotion`.
 - Expose asynchronous shared work as `suspend` functions and `Flow` where state
   updates are needed. Use structured concurrency and propagate cancellation;
   common code must not rely on `Dispatchers.Main`.
@@ -108,10 +114,11 @@ intent using native Android Compose.
 - Add a test with each feature or fix: common business rules in `sharedLogic`
   common tests, Android adapter/ViewModel behaviour in Android host tests, and
   Compose UI behaviour in Android UI tests when UI is introduced.
-- Long-running library downloads use an Android `dataSync` foreground service,
-  with a user-visible progress notification and cancellation. The service owns
-  MQTT only while a transfer is active; do not introduce an always-on background
-  connection without an explicit product requirement.
+- Library scanning is a user-initiated foreground action that reads MediaStore
+  on `Dispatchers.IO` and writes into the Room library; it holds no background
+  connection. Playback runs in a `mediaPlayback` foreground service. Do not
+  introduce an always-on background connection without an explicit product
+  requirement.
 
 ## Workflow and verification
 

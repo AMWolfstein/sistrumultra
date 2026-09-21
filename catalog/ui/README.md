@@ -71,9 +71,12 @@ and Dark. Primary remains rose; inactive controls use themed foreground rather
 than an unrelated accent.
 
 Glass uses `liquidGlassBackground` or existing glass primitives and applies Haze
-only with a `hazeSource`. With `reduceTransparency`, the shell creates no Haze
-state; a new feature must remain legible on that path. Strong blur belongs only
-to persistent navigation, never each row or card.
+only with a `hazeSource`. With `reduceTransparency`, or on API 26–30 where true
+backdrop blur is unavailable, the shell creates no Haze state and provides
+`LocalReduceMotion = true`; a new feature must remain legible on that path
+(`LiquidGlass` falls back to an opaque tint) and must not rely on continuous or
+looping animation. Strong blur belongs only to persistent navigation, never
+each row or card.
 
 Icons use `MaterialSymbol` and the Material Symbols Rounded font. Display text
 and content descriptions come from Android resources. Interactions retain a
@@ -89,30 +92,33 @@ than hard-coded bottom padding.
 | Insight | `InsightContent`, `InsightViewModel` | Derived listening/library analytics; filters and periods stay in the ViewModel. |
 | Library | `LibraryContent` and `Library*Content/ViewModel` | Virtualized lists; sort, filter, and page state belong to the ViewModel. |
 | Details | `Album/Artist/Genre/Composer/PlaylistDetailsContent` | ID selection is in `AppUiState`; playback builds its queue through the ViewModel/controller. |
-| Settings | `SettingsContent`, `AppearanceContent`, playback/sync/integration screens | Preferences and Android adapters are in the host/ViewModel, not shared UI. Integration persists LRCLIB/KuGou switches and a lyrics-source preference: desktop sync is the default; auto-fetch prefers Android provider cache and falls back to desktop. |
+| Settings | `SettingsContent`, `AppearanceContent`, playback/scan/integration screens | Preferences and Android adapters are in the host/ViewModel, not shared UI. Settings lists Appearance, Scan library, Playback, Integration, and About rows. Integration persists LRCLIB/KuGou switches; lyrics always come from the Android provider cache (no desktop source). |
 | Player | `MiniPlayer`, `FullScreenPlayer`, Queue/Lyrics panels | Render `PlaybackModel`; all mutations use playback actions. |
 
-Mood Radio is enabled only by the active sync manifest's
-`library_analysis_enabled` flag. A disabled replacement snapshot ends the
-in-memory radio session and stops refills without changing the current queue.
-The fullscreen track menu exposes Start Mood Radio only for tracks whose active
+Mood Radio is gated on the active sync plan's `library_analysis_enabled`
+flag. Local scan plans never set it, so the action stays off until analysis
+documents are present. A disabled replacement snapshot ends the in-memory
+radio session and stops refills without changing the current queue. The
+fullscreen track menu exposes Start Mood Radio only for tracks whose active
 analysis includes energy, danceability, brightness, and tempo.
 
-Playlist, favorite, and sync UI must not infer data from a desktop local database.
-They read the Android mirror/state exposed by adapters. Context menus receive
+Playlist, favorite, and library UI must not infer data from any external source.
+They read the Android Room database/state exposed by adapters. Context menus receive
 action callbacks; they do not mutate Room or the queue themselves.
 
 Normal playlist detail menus expose a reorder mode. Its grips emit one
-`MOVE_TRACK` mutation when a drag ends; the Android optimistic projection
-renders the resulting order while desktop reconciliation confirms it. Favorites
-and smart playlists do not expose manual reordering.
+`MOVE_TRACK` mutation when a drag ends; the Android Room projection renders
+the resulting order. Favorites and smart playlists do not expose manual
+reordering.
 
-While a replacement sync plan is staging, playlist details continue to render
-the local playlist projection. That projection is removed only after the new
-plan activates, when its synced replacement is already available.
+A library scan stages a fresh `local:` track snapshot under a new plan and
+activates it atomically; playlists and favorites are not part of a scan plan
+and are never replaced by it.
 
-The Sync settings page provides a single ActionList FAQ row and, when the active snapshot enables library analysis, its library-analysis percentage. It emits
-`AppIntent.OpenExternalUrl`; the Android host owns opening the browser.
+The Scan settings page (`settings_scan_library` row) is a self-contained scan
+flow: it requests audio permission when needed, runs `MediaStoreLibraryScanner`
+and `writeLocalLibrary` on `Dispatchers.IO`, and reports running/completed/denied
+states in place (no foreground service, no background connection).
 
 ## Shared composables
 
@@ -128,10 +134,19 @@ system. Reuse the existing primitive before making another component:
 | Modal/menu | `AirmedyBottomSheet`, `AirmedyDialog`, `AnchoredPopupMenu`, context menus |
 | Artwork and status | `DetailHero`, `DiscCard`, `AirmedyPlayingIndicator`, `MaterialSymbol` |
 
-`AirmedyDialog` supports both confirmations and one-action alerts. The app
-shell renders the transient insufficient-storage sync failure above every
-destination from `AndroidSyncState.Failed`; its Close callback resets the
-runtime state to `Idle`, and the failure is never persisted.
+`AirmedyDialog` supports both confirmations and one-action alerts. The scan
+flow reports failures in place on the Scan page rather than through a
+system-wide dialog; the failure is never persisted.
+
+Artwork on `DiscCard`, `AlbumRow`, `DetailHero`, `TrackRow`, the queue panel, and
+both players is resolved by `rememberArtworkThumbnail(artworkPath, audioPath)` /
+`rememberFullscreenArtwork`: the persisted scan-time artwork file wins, and when
+that file is absent the loader falls back to decoding the track's embedded
+picture (via `EmbeddedTagReader`) from the audio file's absolute path, so cover
+art renders immediately even before the user triggers a library re-scan.
+`audioPath` is carried on `LibraryTrack` and on `LibraryAlbum` (the first
+matching track) for album grid/row/hero surfaces. Playlist rows and artist
+surfaces keep resolving pre-extracted artwork paths only.
 
 Settings card groups use a consistent 12dp gap between adjacent cards.
 
@@ -181,7 +196,7 @@ placeholders (not separate labels), and a lyric-content-only preview sheet.
 Selecting
 a candidate saves the Android provider cache. If that track is playing, the
 shell uses the selection for the current playback session only; later plays
-continue to follow the configured Desktop sync or Auto fetch preference.
+continue to follow the configured LRCLIB/KuGou providers.
 
 ## Tests and safe changes
 

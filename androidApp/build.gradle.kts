@@ -56,6 +56,15 @@ val hasReleaseSigning = listOf(
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+val buildAbi =
+    providers.gradleProperty("abi").orNull?.takeIf { it.isNotBlank() } ?: "arm64-v8a"
+val releaseAbiFilters = when (buildAbi) {
+    "arm64-v8a" -> setOf("arm64-v8a")
+    "armeabi-v7a" -> setOf("armeabi-v7a")
+    "universal" -> setOf("arm64-v8a", "armeabi-v7a")
+    else -> setOf("arm64-v8a")
+}
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeCompiler)
@@ -94,13 +103,6 @@ dependencies {
     implementation(libs.compose.uiToolingPreview)
     implementation(libs.haze.core)
     implementation(libs.haze.blur)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.androidx.camera.mlkit)
-    implementation(libs.mlkit.barcode)
-    implementation(libs.hivemq.mqtt)
-    implementation(libs.eddsa)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.room.runtime)
@@ -110,6 +112,7 @@ dependencies {
     ksp(libs.room.compiler)
 
     testImplementation(libs.junit)
+    testImplementation(kotlin("test-junit"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.room.testing)
     androidTestImplementation(libs.androidx.testExt.junit)
@@ -127,8 +130,8 @@ android {
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 9
-        versionName = "1.0.0"
+        versionCode = 12
+        versionName = "1.2.0"
 
         val lastFmApiKey = localProperties.getProperty("LASTFM_API_KEY")
             ?: providers.environmentVariable("LASTFM_API_KEY").getOrElse("")
@@ -147,7 +150,7 @@ android {
             }
         }
         ndk {
-            abiFilters += setOf("arm64-v8a")
+            abiFilters += releaseAbiFilters
         }
     }
     flavorDimensions += "environment"
@@ -165,7 +168,6 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/INDEX.LIST"
-            excludes += "/META-INF/io.netty.versions.properties"
         }
     }
     signingConfigs {

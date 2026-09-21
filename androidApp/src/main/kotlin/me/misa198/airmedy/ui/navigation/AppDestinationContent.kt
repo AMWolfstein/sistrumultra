@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.calculateEndPadding
@@ -22,7 +23,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -40,15 +43,16 @@ import dev.chrisbanes.haze.hazeSource
 import me.misa198.airmedy.AppDestination
 import me.misa198.airmedy.AppDestinationModels
 import me.misa198.airmedy.AppIntent
+import me.misa198.airmedy.ui.components.LocalReduceMotion
 import me.misa198.airmedy.AppStackPage
 import me.misa198.airmedy.StackPageEntry
-import me.misa198.airmedy.SyncUiState
 import me.misa198.airmedy.settings.ThemeMode
 import me.misa198.airmedy.ui.components.HomeContent
 import me.misa198.airmedy.ui.components.StackPageLayout
 import me.misa198.airmedy.ui.screens.AboutContent
 import me.misa198.airmedy.ui.screens.AppearanceContent
 import me.misa198.airmedy.ui.screens.LibraryContent
+import me.misa198.airmedy.ui.screens.LibraryScanContent
 import me.misa198.airmedy.ui.screens.LibrarySearchContent
 import me.misa198.airmedy.ui.screens.LibrarySearchUiState
 import me.misa198.airmedy.ui.screens.InsightContent
@@ -63,9 +67,9 @@ import me.misa198.airmedy.ui.screens.PlaybackSettingsContent
 import me.misa198.airmedy.ui.screens.VolumeNormalizationContent
 import me.misa198.airmedy.ui.screens.SongTransitionContent
 import me.misa198.airmedy.ui.screens.EqualizerContent
-import me.misa198.airmedy.ui.screens.SyncContent
 import me.misa198.airmedy.lastfm.LastFmStatus
-import me.misa198.airmedy.ui.screens.SyncScannerContent
+import me.misa198.airmedy.sync.AndroidSyncRuntime
+import me.misa198.airmedy.sync.stageArtistArtwork
 import me.misa198.airmedy.ui.theme.LocalAirmedyColors
 
 import me.misa198.airmedy.ui.screens.LibraryTracksContent
@@ -182,6 +186,19 @@ internal fun AppDestinationContent(
     val selectedArtistDetails = remember(artistDetailsUiState, selectedArtistId) {
         selectedArtistId?.let { artistDetailsUiStateFor(artistDetailsUiState, it) } ?: ArtistDetailsUiState()
     }
+    val artistImagePickerScope = rememberCoroutineScope()
+    val artistImagePickerContext = LocalContext.current.applicationContext
+    val artistImagePicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        val artistId = selectedArtistId ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        artistImagePickerScope.launch {
+            runCatching {
+                AndroidSyncRuntime.syncStore().stageArtistArtwork(
+                    me.misa198.airmedy.sync.stageArtistArtwork(artistImagePickerContext.contentResolver, artistImagePickerContext.filesDir, artistId, uri),
+                )
+            }
+        }
+    }
     val selectedGenreDetails = remember(genreDetailsUiState, selectedGenreId) {
         selectedGenreId?.let { genreDetailsUiStateFor(genreDetailsUiState, it) } ?: GenreDetailsUiState()
     }
@@ -235,18 +252,13 @@ internal fun AppDestinationContent(
     val onArtistTrackContextBottomSheet = onTrackContextBottomSheet
     val onGenreTrackContextBottomSheet = onTrackContextBottomSheet
     val onComposerTrackContextBottomSheet = onTrackContextBottomSheet
-    val syncUiState = settings.syncState
-    val onPairingQrScanned = settings.onPairingQrScanned
-    val onUnpair = settings.onUnpair
-    val onSyncScreenVisible = settings.onSyncScreenVisible
-    val onSyncScreenHidden = settings.onSyncScreenHidden
     val lastFmStatus = settings.lastFmStatus
     val onLastFmConnect = settings.onLastFmConnect
     val onLastFmDisconnect = settings.onLastFmDisconnect
     val lyricsSettings = settings.lyricsSettings
     val onLrclibChanged = settings.onLrclibChanged
     val onKugouChanged = settings.onKugouChanged
-    val onLyricsSourceChanged = settings.onLyricsSourceChanged
+    val onEmbeddedChanged = settings.onEmbeddedChanged
     val crossfadeSeconds = settings.crossfadeSeconds
     val lastEnabledCrossfadeSeconds = settings.lastEnabledCrossfadeSeconds
     val onCrossfadeSecondsChanged = settings.onCrossfadeSecondsChanged
@@ -299,11 +311,14 @@ internal fun AppDestinationContent(
             },
             showHeader = false,
         ) { modifier, contentPadding ->
+            val reduceMotion = LocalReduceMotion.current
             AnimatedContent(
                 targetState = stackPage,
                 modifier = modifier,
                 transitionSpec = {
-                    if (targetState.destination != initialState.destination) {
+                    if (reduceMotion) {
+                        fadeIn(animationSpec = tween(120)) togetherWith fadeOut(animationSpec = tween(120))
+                    } else if (targetState.destination != initialState.destination) {
                         fadeIn(animationSpec = tween(durationMillis = 200)) togetherWith
                             fadeOut(animationSpec = tween(durationMillis = 200))
                     } else if (isForwardTransition(targetState, initialState)) {
@@ -395,12 +410,7 @@ internal fun AppDestinationContent(
                                 },
                                 hazeState = hazeState,
                             )
-                            AppStackPage.SettingsSync -> SyncContent(
-                                syncUiState = syncUiState,
-                                onUnpair = onUnpair,
-                                onOpenExternalUrl = { url -> onIntent(AppIntent.OpenExternalUrl(url)) },
-                                onScreenVisible = onSyncScreenVisible,
-                                onScreenHidden = onSyncScreenHidden,
+                            AppStackPage.SettingsScan -> LibraryScanContent(
                                 modifier = settingsPageModifier,
                             )
                             AppStackPage.SettingsPlayback -> PlaybackSettingsContent(
@@ -438,10 +448,6 @@ internal fun AppDestinationContent(
                                 onBandChanged = onEqualizerBandChanged,
                                 modifier = settingsPageModifier,
                             )
-                            AppStackPage.SettingsSyncScanner -> SyncScannerContent(
-                                onQrScanned = onPairingQrScanned,
-                                modifier = Modifier.padding(contentPadding),
-                            )
                             AppStackPage.SettingsIntegration -> IntegrationContent(
                                 onLastFmSelected = { onIntent(AppIntent.OpenPage(AppStackPage.SettingsLastFm)) },
                                 onLyricsSelected = { onIntent(AppIntent.OpenPage(AppStackPage.SettingsLyrics)) },
@@ -453,12 +459,9 @@ internal fun AppDestinationContent(
                                 onDisconnect = onLastFmDisconnect,
                                 modifier = settingsPageModifier,
                             )
-                            AppStackPage.SettingsLyrics -> LyricsContent(lyricsSettings, onLyricsSourceChanged, onLrclibChanged, onKugouChanged, settingsPageModifier)
+                            AppStackPage.SettingsLyrics -> LyricsContent(lyricsSettings, onLrclibChanged, onKugouChanged, onEmbeddedChanged, settingsPageModifier)
                             AppStackPage.SettingsAbout -> AboutContent(
                                 modifier = settingsPageModifier,
-                                onOpenExternalUrl = { url ->
-                                    onIntent(AppIntent.OpenExternalUrl(url))
-                                },
                             )
                             else -> SettingsContent(
                                 modifier = settingsPageModifier,
@@ -468,8 +471,8 @@ internal fun AppDestinationContent(
                                 onPlaybackSelected = {
                                     onIntent(AppIntent.OpenPage(AppStackPage.SettingsPlayback))
                                 },
-                                onSyncSelected = {
-                                    onIntent(AppIntent.OpenPage(AppStackPage.SettingsSync))
+                                onScanSelected = {
+                                    onIntent(AppIntent.OpenPage(AppStackPage.SettingsScan))
                                 },
                                 onIntegrationSelected = {
                                     onIntent(AppIntent.OpenPage(AppStackPage.SettingsIntegration))
@@ -527,6 +530,7 @@ internal fun AppDestinationContent(
                                 onPlayNext = onArtistPlayNext,
                                 onAddToQueue = onArtistAddToQueue,
                                 onTrackContextBottomSheet = onArtistTrackContextBottomSheet,
+                                onAddArtistImage = { artistImagePicker.launch("image/*") },
                                 onAlbumClick = { album -> onIntent(AppIntent.OpenAlbumDetails(album.id)) },
                                 playbackQueue = playbackQueue,
                             )
