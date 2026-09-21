@@ -10,14 +10,11 @@ database, Wails bindings, or Remote API.
 - Android supports API 31 (Android 12) and newer; this baseline allows the
   floating navigation to use true backdrop blur.
 - `sharedLogic` is the future cross-platform business-logic module.
-- iOS is intentionally frozen. Do not modify `iosApp` or iOS targets unless a
-  task explicitly enables iOS work.
+- iOS support was removed; this is currently an Android-only app.
 
-See [AGENTS.md](AGENTS.md) for the mandatory engineering rules and cleanup
-sequence.
-
-Android Compose UI architecture and reusable components are documented in the
-[mobile UI catalog](catalog/ui/README.md).
+Detailed architecture docs, including the Android Compose UI catalog, live in
+the `catalog/` folder of the original misa198/airmedy monorepo, not in this
+repo.
 
 ## Module boundaries
 
@@ -39,8 +36,7 @@ standard page transition; switching destination stacks changes the title and
 content together while the floating navigation remains in place.
 
 `sharedLogic` must remain UI- and platform-neutral. Android implements its ports
-inside `androidApp`. When iOS work is authorized, it will have native SwiftUI and
-its own adapters while using the same shared business contracts.
+inside `androidApp`.
 
 The mobile pairing and library-sync protocols are implemented in `sharedLogic`:
 QR parsing, MQTT topic construction, signed request/response validation, sync

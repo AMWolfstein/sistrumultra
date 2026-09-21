@@ -7,16 +7,6 @@ plugins {
 }
 
 kotlin {
-    listOf(
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach { iosTarget ->
-        iosTarget.binaries.framework {
-            baseName = "SharedLogic"
-            isStatic = true
-        }
-    }
-    
     android {
        namespace = "me.misa198.airmedy.sharedLogic"
        compileSdk = libs.versions.android.compileSdk.get().toInt()
