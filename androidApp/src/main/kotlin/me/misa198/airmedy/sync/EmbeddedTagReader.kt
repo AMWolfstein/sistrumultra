@@ -473,9 +473,12 @@ internal object EmbeddedTagReader {
         return if (mean == null && name == null) null else listOfNotNull(mean, name).joinToString(".")
     }
 
+    /** `mean`/`name` atoms are laid out like `data` atoms minus the locale field:
+     *  a 4-byte version/flags header precedes the string payload. */
     private fun ByteArray.atomText(box: Mp4Box): String? {
-        if (box.end <= box.start) return null
-        return String(copyOfRange(box.start, box.end), Charsets.UTF_8).trim('\u0000', ' ')
+        val payloadStart = box.start + 4
+        if (payloadStart >= box.end) return null
+        return String(copyOfRange(payloadStart, box.end), Charsets.UTF_8).trim('\u0000', ' ')
     }
 
     // ---------------------------------------------------------------- RIFF / AIFF
@@ -670,7 +673,10 @@ internal object EmbeddedTagReader {
         val tagLength = this.syncsafeInt(6)
         if (tagLength <= 0) return null
         var body = copyOfRange(10, (10 + tagLength).coerceAtMost(size))
-        if (major == 3 && flags and 0x80 != 0) body = body.unsync()
+        // v2.2/2.3 apply this single flag to the whole tag body; v2.4 instead uses a
+        // per-frame flag (handled where each frame is read) since its syncsafe frame
+        // lengths stay readable without unsyncing first.
+        if ((major == 2 || major == 3) && flags and 0x80 != 0) body = body.unsync()
         return body to major
     }
 
