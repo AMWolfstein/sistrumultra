@@ -134,9 +134,11 @@ internal fun trackInfoValues(track: LibraryTrack): List<TrackInfoValue> {
         TrackInfoValue(R.string.track_info_label, text("label")),
         TrackInfoValue(R.string.track_info_copyright, text("copyright")),
         TrackInfoValue(R.string.track_info_isrc, text("isrc")),
-        TrackInfoValue(R.string.track_info_duration, formatTrackDuration(number("duration"))),
+        // "duration" is LocalTrack.durationMillis; formatTrackDuration takes seconds.
+        TrackInfoValue(R.string.track_info_duration, formatTrackDuration(number("duration")?.div(1000))),
         TrackInfoValue(R.string.track_info_format, text("format").uppercase()),
-        TrackInfoValue(R.string.track_info_bitrate, bitrate?.takeIf { it > 0 }?.let { "${it} kbps" }.orEmpty()),
+        // MediaStore.Audio.Media.BITRATE is bits-per-second; convert to kbps.
+        TrackInfoValue(R.string.track_info_bitrate, bitrate?.takeIf { it > 0 }?.let { "${it / 1000} kbps" }.orEmpty()),
         TrackInfoValue(R.string.track_info_sample_rate, sampleRate?.takeIf { it > 0 }?.let { formatSampleRate(it) }.orEmpty()),
         TrackInfoValue(R.string.track_info_bit_depth, bitDepth?.takeIf { it > 0 }?.let { "$it-bit" }.orEmpty()),
         TrackInfoValue(R.string.track_info_codec, text("codec").uppercase()),

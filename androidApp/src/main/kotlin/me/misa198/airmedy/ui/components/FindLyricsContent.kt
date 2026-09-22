@@ -56,8 +56,10 @@ internal fun FindLyricsContent(
     val colors = LocalAirmedyColors.current
     val density = LocalDensity.current
     val topSafeInset = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+    // "duration" is LocalTrack.durationMillis; formatTrackDuration takes seconds.
     val duration = track.metadataObject()?.get("duration")
         ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toLongOrNull() }
+        ?.let { it / 1000 }
         ?.let(::formatTrackDuration).orEmpty()
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {

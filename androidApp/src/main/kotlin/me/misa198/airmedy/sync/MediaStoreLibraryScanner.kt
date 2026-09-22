@@ -4,6 +4,8 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -141,6 +143,7 @@ internal class MediaStoreLibraryScanner(
                 // single-disc, 12-track album).
                 val rawTrack = number(ColumnTrackNumber) ?: 0L
                 val trackNumber = if (rawTrack > 1000) (rawTrack % 1000).toInt() else rawTrack.toInt()
+                val format = mime.substringAfter("audio/", mime).ifBlank { data.substringAfterLast('.', "").lowercase() }
                 if (size > 0L) {
                     audio[trackId] = LocalScanAudio(
                         trackId = trackId,
@@ -183,11 +186,11 @@ internal class MediaStoreLibraryScanner(
                     addedAt = isoDate(dateAdded),
                     artworkKey = "album-$key",
                     archived = false,
-                    format = mime.substringAfter("audio/", mime).ifBlank { data.substringAfterLast('.', "").lowercase() },
+                    format = format,
                     bitrate = number(ColumnBitrate)?.toInt() ?: 0,
                     sampleRate = number(ColumnSampleRate)?.toInt() ?: 0,
                     bitDepth = number(ColumnBitsPerSample)?.toInt() ?: 0,
-                    codec = mime.substringAfter("audio/", mime),
+                    codec = realCodec(format, mime, data),
                     fileSize = size,
                     releaseDate = releaseDate,
                     bpm = bpm,
@@ -226,6 +229,37 @@ internal class MediaStoreLibraryScanner(
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
             }
         }.getOrNull()?.takeIf { it > 0 } ?: reported
+    }
+
+    /**
+     * The M4A/MP4 container's mime type ("audio/mp4") doesn't distinguish the actual
+     * codec inside it (e.g. AAC vs. ALAC), which previously made every M4A file
+     * misreport as Lossy quality. Sniff the real per-track codec via MediaExtractor's
+     * own demuxer for m4a/mp4; other containers' mime already names their one codec.
+     */
+    private fun realCodec(format: String, mime: String, path: String): String {
+        val fallback = mime.substringAfter("audio/", mime)
+        if (format != "mp4" && format != "m4a") return fallback
+        return runCatching {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(path)
+                for (index in 0 until extractor.trackCount) {
+                    val trackMime = extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME) ?: continue
+                    if (!trackMime.startsWith("audio/")) continue
+                    return@runCatching when (trackMime) {
+                        // Android has no MediaFormat.MIMETYPE_AUDIO_ALAC constant; ALAC's
+                        // own registered mime string is "audio/alac".
+                        "audio/alac" -> "alac"
+                        MediaFormat.MIMETYPE_AUDIO_AAC -> "aac"
+                        else -> trackMime.substringAfter("audio/", trackMime)
+                    }
+                }
+                fallback
+            } finally {
+                extractor.release()
+            }
+        }.getOrDefault(fallback)
     }
 
     private fun artistsOf(raw: String): List<LocalArtistRef> = raw
