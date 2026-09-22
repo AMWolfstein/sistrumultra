@@ -71,7 +71,7 @@ class TrackInfoContentTest {
         val details = trackInfoValues(track("""{
             "raw_artist_names":"Artist",
             "raw_genre_names":"Electronic",
-            "duration":245,
+            "duration":245000,
             "format":"flac",
             "bitrate":1000,
             "sample_rate":96000,
