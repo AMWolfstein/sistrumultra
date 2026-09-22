@@ -13,6 +13,7 @@ import android.provider.MediaStore
 import android.util.Size
 import java.io.File
 import java.security.MessageDigest
+import java.text.Normalizer
 import java.time.Instant
 import me.misa198.airmedy.library.LocalAlbumRef
 import me.misa198.airmedy.library.LocalArtistRef
@@ -442,11 +443,17 @@ internal class MediaStoreLibraryScanner(
 internal fun albumKey(columnValue: String?, artist: String, album: String): String =
     columnValue?.takeIf { it.isNotBlank() } ?: sha256Hex("$artist|$album").take(12)
 
-internal fun artistId(name: String): String = "local:artist:" + sha256Hex(name.trim().lowercase()).take(16)
+internal fun artistId(name: String): String = "local:artist:" + sha256Hex(foldDiacritics(name)).take(16)
 
-internal fun genreId(name: String): String = "local:genre:" + sha256Hex(name.trim().lowercase()).take(16)
+internal fun genreId(name: String): String = "local:genre:" + sha256Hex(foldDiacritics(name)).take(16)
 
-internal fun composerId(name: String): String = "local:composer:" + sha256Hex(name.trim().lowercase()).take(16)
+internal fun composerId(name: String): String = "local:composer:" + sha256Hex(foldDiacritics(name)).take(16)
+
+/** NFKD-decomposes and strips diacritical marks so "Björk" and "Bjork" hash the same. */
+internal fun foldDiacritics(name: String): String =
+    Normalizer.normalize(name.trim().lowercase(), Normalizer.Form.NFKD).replace(DiacriticalMarks, "")
+
+private val DiacriticalMarks = Regex("\\p{Mn}+")
 
 internal fun isoDate(epochSeconds: Long): String = if (epochSeconds > 0L) Instant.ofEpochSecond(epochSeconds).toString() else ""
 
