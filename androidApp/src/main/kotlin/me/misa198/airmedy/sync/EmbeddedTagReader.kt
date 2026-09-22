@@ -162,11 +162,25 @@ internal object EmbeddedTagReader {
     private fun oggPicture(bytes: ByteArray): ByteArray? = oggVorbisComment(bytes)?.picture
 
     private fun oggVorbisComment(bytes: ByteArray): VorbisComment? {
-        // The vorbis comment header packet starts with 0x03 "vorbis".
-        val needle = byteArrayOf(0x03, 'v'.code.toByte(), 'o'.code.toByte(), 'r'.code.toByte(), 'b'.code.toByte(), 'i'.code.toByte(), 's'.code.toByte())
+        // Opus streams identify their comment header packet with the ASCII
+        // magic "OpusTags" (no leading type byte); real Vorbis streams use a
+        // 0x03 type byte followed by "vorbis". Detect the stream type from
+        // the first page's "OpusHead"/0x01+"vorbis" identification packet so
+        // the right needle is searched for.
+        val needle = if (bytes.isOpusStream()) {
+            "OpusTags".toByteArray(Charsets.US_ASCII)
+        } else {
+            byteArrayOf(0x03, 'v'.code.toByte(), 'o'.code.toByte(), 'r'.code.toByte(), 'b'.code.toByte(), 'i'.code.toByte(), 's'.code.toByte())
+        }
         val start = bytes.indexOfNeedle(needle)
         if (start < 0) return null
         return bytes.copyOfRange(start + needle.size, bytes.size).vorbisComment()
+    }
+
+    /** Detects Opus (vs. Vorbis) from the "OpusHead" identification packet near the file head. */
+    private fun ByteArray.isOpusStream(): Boolean {
+        val needle = "OpusHead".toByteArray(Charsets.US_ASCII)
+        return indexOfNeedle(needle, limit = minOf(size, 4096)) >= 0
     }
 
     /** Parsed Vorbis-comment block; any of the fields may be null when absent. */
@@ -200,7 +214,9 @@ internal object EmbeddedTagReader {
                 // non-Latin lyrics (e.g. Korean) survive past the ASCII key scan.
                 val entryValue = String(entry, equals + 1, entry.size - equals - 1, Charsets.UTF_8)
                 when (key) {
-                    "LYRICS" -> if (lyrics == null) lyrics = entryValue
+                    // LYRICS and SYNCEDLYRICS (e.g. written by Mp3tag) are both treated as
+                    // synced text and take priority over UNSYNCEDLYRICS below.
+                    "LYRICS", "SYNCEDLYRICS" -> if (lyrics == null) lyrics = entryValue
                     "UNSYNCEDLYRICS" -> if (unsynced == null) unsynced = entryValue
                     "METADATA_BLOCK_PICTURE" -> if (picture == null) picture = entryValue.decodePictureBlock()
                 }
@@ -407,6 +423,8 @@ internal object EmbeddedTagReader {
         return null
     }
 
+    // TODO: ID3v2 SYLT (synchronised lyrics/text) frames are not parsed here — MP3-only,
+    // a distinct binary structure from USLT, and lower priority. Falls back to USLT for now.
     private fun id3Uslt(bytes: ByteArray): String? {
         val (body, major) = bytes.id3Body() ?: return null
         var pos = 0
