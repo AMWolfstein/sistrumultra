@@ -7,6 +7,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class EmbeddedTagReaderTest {
 
@@ -84,30 +85,89 @@ class EmbeddedTagReaderTest {
     }
 
     @Test fun `ogg vorbis lyrics`() {
-        val comment = vorbisComment(comments = listOf("LYRICS=$lrc"))
-        val bytes = ByteArrayOutputStream().apply {
-            write("OggS".toByteArray(Charsets.ISO_8859_1))
-            write(byteArrayOf(0x00, 0x00, 0x00))
-            write(0x03)
-            write("vorbis".toByteArray(Charsets.ISO_8859_1))
-            write(comment)
-        }.toByteArray()
-        val file = temp("ogg", bytes)
+        val file = temp("ogg", oggVorbis(vorbisComment(comments = listOf("LYRICS=$lrc"))))
         assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
     }
 
     @Test fun `ogg metadata block picture artwork`() {
         val b64 = java.util.Base64.getEncoder().encodeToString(pictureBlock(image))
-        val comment = vorbisComment(comments = listOf("METADATA_BLOCK_PICTURE=$b64"))
-        val bytes = ByteArrayOutputStream().apply {
-            write("OggS".toByteArray(Charsets.ISO_8859_1))
-            write(byteArrayOf(0x00, 0x00, 0x00))
-            write(0x03)
-            write("vorbis".toByteArray(Charsets.ISO_8859_1))
-            write(comment)
-        }.toByteArray()
-        val file = temp("ogg-picture", bytes)
+        val file = temp("ogg-picture", oggVorbis(vorbisComment(comments = listOf("METADATA_BLOCK_PICTURE=$b64"))))
         assertEquals(image.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    /**
+     * Mirrors the page layout of a real affected SpotiFLAC/libopusenc file: same vendor,
+     * tag keys and value lengths, a 6531-byte LYRICS value straddling a 4080-byte page
+     * boundary, two covers (75 KB, then 418 KB) and trailing padding, so the ~680 KB
+     * comment packet spans ~170 pages and ends past the old 512 KB read prefix.
+     */
+    @Test fun `opus comment header spanning many pages keeps lyrics artwork and tags`() {
+        val lyrics = lrcOfLength(6531 - "LYRICS=".length)
+        val front = imageOfSize(75_247, seed = 1)
+        val back = imageOfSize(418_458, seed = 2)
+        val comments = listOf(
+            filler("COMPATIBLE_BRANDS", 38), filler("COPYRIGHT", 27), "DATE=2024-06-12", filler("DISCNUMBER", 12),
+            filler("ENCODER", 35), filler("ENCODER", 20), filler("ENCODER_OPTIONS", 29), "ISRC=EGA012400123",
+            "LYRICS=$lyrics", filler("MAJOR_BRAND", 16), filler("MINOR_VERSION", 15), filler("ORGANIZATION", 25),
+            filler("R128_ALBUM_GAIN", 20), filler("R128_TRACK_GAIN", 20), filler("TRACKNUMBER", 16),
+            "UNSYNCEDLYRICS=" + "u".repeat(6539 - "UNSYNCEDLYRICS=".length), "YEAR=2024",
+            "METADATA_BLOCK_PICTURE=" + base64Picture(front, pictureType = 3),
+            "METADATA_BLOCK_PICTURE=" + base64Picture(back, pictureType = 4),
+            filler("TITLE", 16), filler("ARTIST", 24), filler("ALBUMARTIST", 29), filler("ALBUM", 25), filler("GENRE", 14),
+        )
+        val bytes = oggOpus(vorbisComment(comments, vendor = "libopus 1.6, libopusenc 0.3"), padding = 10_412)
+        // Sanity-check the fixture reproduces the failure shape: the lyrics are split by a
+        // page header, and the comment packet extends past the old 512 KB read prefix.
+        assertEquals(-1, bytes.indexOf(lyrics.toByteArray(Charsets.UTF_8)))
+        assertTrue(bytes.size > 600 * 1024)
+        val file = temp("opus-multipage", bytes)
+
+        assertEquals(lyrics, EmbeddedTagReader.embeddedLyricsText(file.path))
+        assertEquals(front.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals("EGA012400123", tags.isrc)
+        assertEquals("2024-06-12", tags.releaseDate)
+    }
+
+    @Test fun `opus artwork beyond the first 512 KB is read`() {
+        val cover = imageOfSize(600_000, seed = 3)
+        val comment = vorbisComment(listOf("METADATA_BLOCK_PICTURE=" + base64Picture(cover)), vendor = "libopus 1.6, libopusenc 0.3")
+        val file = temp("opus-large-cover", oggOpus(comment))
+        assertEquals(cover.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    /** libvorbis/libogg layout: comment and setup packets share pages of up to 255 segments. */
+    @Test fun `vorbis comment header spanning pages keeps lyrics and artwork`() {
+        val lyrics = lrcOfLength(70_000)
+        val cover = imageOfSize(150_000, seed = 4)
+        val comment = vorbisComment(
+            listOf("TITLE=Vorbis", "LYRICS=$lyrics", "METADATA_BLOCK_PICTURE=" + base64Picture(cover)),
+            vendor = "Xiph.Org libVorbis I 20200704 (Reducing Environment)",
+        )
+        val bytes = oggVorbis(comment)
+        assertEquals(-1, bytes.indexOf(lyrics.toByteArray(Charsets.UTF_8)))
+        val file = temp("vorbis-multipage", bytes)
+        assertEquals(lyrics, EmbeddedTagReader.embeddedLyricsText(file.path))
+        assertEquals(cover.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    @Test fun `ogg pages from another multiplexed stream are skipped`() {
+        val lyrics = lrcOfLength(10_000)
+        val pages = oggPages(
+            listOf(opusHead(), "OpusTags".toByteArray(Charsets.US_ASCII) + vorbisComment(listOf("LYRICS=$lyrics"))),
+            maxSegmentsPerPage = 16,
+        )
+        val foreign = oggPages(listOf(ByteArray(300) { 7 }), serial = 0x0BADF00D, maxSegmentsPerPage = 16).single()
+        val bytes = (pages.take(2) + foreign + pages.drop(2)).fold(ByteArray(0)) { acc, page -> acc + page }
+        val file = temp("opus-multiplexed", bytes)
+        assertEquals(lyrics, EmbeddedTagReader.embeddedLyricsText(file.path))
+    }
+
+    @Test fun `truncated ogg comment header returns null`() {
+        val comment = vorbisComment(listOf("LYRICS=" + lrcOfLength(20_000)))
+        val bytes = oggOpus(comment)
+        val file = temp("opus-truncated", bytes.copyOf(10_000))
+        assertNull(EmbeddedTagReader.embeddedLyricsText(file.path))
     }
 
     @Test fun `m4a covr artwork`() {
@@ -193,9 +253,11 @@ class EmbeddedTagReaderTest {
         return out.toByteArray()
     }
 
-    private fun vorbisComment(comments: List<String>): ByteArray {
+    private fun vorbisComment(comments: List<String>, vendor: String = ""): ByteArray {
         val out = ByteArrayOutputStream()
-        out.writeIntLE(0)
+        val vendorBytes = vendor.toByteArray(Charsets.UTF_8)
+        out.writeIntLE(vendorBytes.size)
+        out.write(vendorBytes)
         out.writeIntLE(comments.size)
         comments.forEach { entry ->
             val bytes = entry.toByteArray(Charsets.UTF_8)
@@ -203,6 +265,136 @@ class EmbeddedTagReaderTest {
             out.write(bytes)
         }
         return out.toByteArray()
+    }
+
+    // ---------------------------------------------------------------- OGG fixtures
+
+    /** "KEY=value" padded to exactly [length] bytes, matching a real tag's size. */
+    private fun filler(key: String, length: Int): String = "$key=" + "x".repeat(length - key.length - 1)
+
+    /** LRC-shaped UTF-8 text (multi-byte Arabic included) of exactly [length] bytes. */
+    private fun lrcOfLength(length: Int): String {
+        val sb = StringBuilder()
+        var line = 0
+        while (sb.toString().toByteArray(Charsets.UTF_8).size < length) {
+            sb.append("[%02d:%02d.00]سطر رقم %d line\n".format(line / 60, line % 60, line))
+            line++
+        }
+        var text = sb.toString()
+        while (text.toByteArray(Charsets.UTF_8).size > length) text = text.dropLast(1)
+        return text + "a".repeat(length - text.toByteArray(Charsets.UTF_8).size)
+    }
+
+    private fun imageOfSize(size: Int, seed: Int): ByteArray =
+        kotlin.random.Random(seed).nextBytes(size).also { image.copyInto(it, endIndex = 8) }
+
+    private fun base64Picture(imageBytes: ByteArray, pictureType: Int = 3): String =
+        java.util.Base64.getEncoder().encodeToString(pictureBlock(imageBytes, pictureType))
+
+    private fun opusHead(): ByteArray = ByteArrayOutputStream().apply {
+        write("OpusHead".toByteArray(Charsets.US_ASCII))
+        write(byteArrayOf(1, 2, 0x38, 0x01, 0x44, 0xAC.toByte(), 0, 0, 0, 0, 0))
+    }.toByteArray()
+
+    /**
+     * libopusenc layout: OpusHead alone on the BOS page, then the OpusTags packet (plus
+     * [padding] zero bytes, as libopusenc reserves) on pages of 16 lacing values (4080
+     * bytes), then audio pages.
+     */
+    private fun oggOpus(comment: ByteArray, padding: Int = 0): ByteArray {
+        val tags = "OpusTags".toByteArray(Charsets.US_ASCII) + comment + ByteArray(padding)
+        val audio = List(40) { ByteArray(160) { i -> (i * 31 + it).toByte() } }
+        return oggPages(listOf(opusHead(), tags) + audio, maxSegmentsPerPage = 16, pageStarts = setOf(1, 2))
+            .fold(ByteArray(0)) { acc, page -> acc + page }
+    }
+
+    /** libvorbis layout: id header alone on the BOS page; comment and setup headers share pages. */
+    private fun oggVorbis(comment: ByteArray): ByteArray {
+        val id = byteArrayOf(0x01) + "vorbis".toByteArray(Charsets.US_ASCII) + ByteArray(23) { 1 }
+        val commentPacket = byteArrayOf(0x03) + "vorbis".toByteArray(Charsets.US_ASCII) + comment + byteArrayOf(0x01)
+        val setup = byteArrayOf(0x05) + "vorbis".toByteArray(Charsets.US_ASCII) + ByteArray(3_000) { 5 }
+        val audio = List(20) { ByteArray(400) { i -> (i + it).toByte() } }
+        return oggPages(listOf(id, commentPacket, setup) + audio, maxSegmentsPerPage = 255, pageStarts = setOf(1, 3))
+            .fold(ByteArray(0)) { acc, page -> acc + page }
+    }
+
+    /**
+     * Lays [packets] out as spec-conformant Ogg pages: lacing values in each page's
+     * segment table, packets continued across pages (header type 0x01), BOS on the
+     * first page, EOS on the last, and a valid page CRC. A page is flushed once it
+     * holds [maxSegmentsPerPage] lacing values, and before each packet in [pageStarts].
+     */
+    private fun oggPages(
+        packets: List<ByteArray>,
+        serial: Int = 0x16F3F5BA,
+        maxSegmentsPerPage: Int,
+        pageStarts: Set<Int> = emptySet(),
+    ): List<ByteArray> {
+        val pages = ArrayList<ByteArray>()
+        val lacing = ArrayList<Int>()
+        val body = ByteArrayOutputStream()
+        var continued = false
+        var nextPageContinued = false
+        fun flush(eos: Boolean) {
+            if (lacing.isEmpty()) return
+            val flags = (if (continued) 0x01 else 0) or (if (pages.isEmpty()) 0x02 else 0) or (if (eos) 0x04 else 0)
+            pages += oggPage(flags, serial, pages.size, lacing, body.toByteArray())
+            lacing.clear(); body.reset()
+            continued = nextPageContinued
+        }
+        packets.forEachIndexed { index, packet ->
+            if (index in pageStarts) flush(eos = false)
+            var offset = 0
+            while (true) {
+                val length = minOf(255, packet.size - offset)
+                lacing += length
+                body.write(packet, offset, length)
+                offset += length
+                val packetDone = length < 255
+                nextPageContinued = !packetDone
+                if (lacing.size == maxSegmentsPerPage) flush(eos = false)
+                if (packetDone) break
+            }
+            nextPageContinued = false
+        }
+        flush(eos = true)
+        return pages
+    }
+
+    private fun oggPage(flags: Int, serial: Int, sequence: Int, lacing: List<Int>, body: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write("OggS".toByteArray(Charsets.US_ASCII))
+        out.write(0) // stream structure version
+        out.write(flags)
+        repeat(8) { out.write(0) } // granule position (unused by the tag reader)
+        out.writeIntLE(serial)
+        out.writeIntLE(sequence)
+        out.writeIntLE(0) // CRC placeholder
+        out.write(lacing.size)
+        lacing.forEach { out.write(it) }
+        out.write(body)
+        val page = out.toByteArray()
+        val crc = oggCrc(page)
+        for (i in 0 until 4) page[22 + i] = (crc ushr (8 * i)).toByte()
+        return page
+    }
+
+    /** Ogg's CRC-32 (polynomial 0x04C11DB7, zero init, unreflected) over the page with a zeroed CRC field. */
+    private fun oggCrc(page: ByteArray): Int {
+        var crc = 0
+        for (byte in page) {
+            crc = crc xor ((byte.toInt() and 0xFF) shl 24)
+            repeat(8) { crc = if (crc and 0x80000000.toInt() != 0) (crc shl 1) xor 0x04C11DB7 else crc shl 1 }
+        }
+        return crc
+    }
+
+    private fun ByteArray.indexOf(needle: ByteArray): Int {
+        outer@ for (start in 0..size - needle.size) {
+            for (i in needle.indices) if (this[start + i] != needle[i]) continue@outer
+            return start
+        }
+        return -1
     }
 
     private fun id3v23(frames: List<ByteArray>): ByteArray = id3(3, 0, frames)

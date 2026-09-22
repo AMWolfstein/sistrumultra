@@ -12,8 +12,9 @@ import java.io.InputStream
  * - FLAC (`fLaC`): METADATA_BLOCK_PICTURE (front cover) artwork and the
  *   Vorbis-comment `LYRICS`/`UNSYNCEDLYRICS` tags. The `LYRICS` tag commonly
  *   holds LRC-formatted synced text.
- * - OGG/Opus (`OggS`): Vorbis-comment `LYRICS`/`UNSYNCEDLYRICS` text and
- *   `METADATA_BLOCK_PICTURE` artwork (base64 per RFC 7845).
+ * - OGG Opus/Vorbis (`OggS`): Vorbis-comment `LYRICS`/`UNSYNCEDLYRICS` text and
+ *   `METADATA_BLOCK_PICTURE` artwork (base64 per RFC 7845). The comment header
+ *   packet is reassembled across pages, so it is read in full (up to a sanity cap).
  * - M4A/MP4 (`ftyp`): `moov > udta > meta > ilst` `covr` artwork, the
  *   `\u00A9lyr` lyrics atom, and the iTunes `----:com.apple.iTunes:LYRICS`
  *   free-form lyrics atom. Tags placed after a leading `mdat` (non-faststart
@@ -44,7 +45,13 @@ internal object EmbeddedTagReader {
 
     private const val FlacReadLimit = 8 * 1024 * 1024
     private const val Id3ReadLimit = 24 * 1024 * 1024
-    private const val OggReadLimit = 512 * 1024
+    /** Cap on bytes walked to reassemble the OGG header packets (same bound as ID3). */
+    private const val OggReadLimit = 24 * 1024 * 1024
+    private const val OggPageHeaderSize = 27
+    private val OpusHeadMagic = "OpusHead".toByteArray(Charsets.US_ASCII)
+    private val OpusTagsMagic = "OpusTags".toByteArray(Charsets.US_ASCII)
+    private val VorbisIdMagic = byteArrayOf(0x01) + "vorbis".toByteArray(Charsets.US_ASCII)
+    private val VorbisCommentMagic = byteArrayOf(0x03) + "vorbis".toByteArray(Charsets.US_ASCII)
     private const val Mp4ReadLimit = 24 * 1024 * 1024
     private const val RiffReadLimit = 24 * 1024 * 1024
     private const val MagicReadLimit = 32 * 1024
@@ -55,7 +62,7 @@ internal object EmbeddedTagReader {
         when {
             head.isFlac() -> flacPicture(readPrefix(path, FlacReadLimit) ?: return null)
             head.isId3() -> id3Apic(readPrefix(path, Id3ReadLimit) ?: return null)
-            head.isOgg() -> oggPicture(readPrefix(path, OggReadLimit) ?: return null)
+            head.isOgg() -> oggPicture(path)
             head.isMp4() -> mp4Covr(readPrefix(path, Mp4ReadLimit) ?: return null)
             head.isRiff() || head.isForm() -> riffId3Picture(readPrefix(path, RiffReadLimit) ?: return null)
             else -> null
@@ -70,7 +77,7 @@ internal object EmbeddedTagReader {
             val head = readPrefix(path, MagicReadLimit) ?: return null
             when {
                 head.isFlac() -> flacVorbisLyrics(readPrefix(path, FlacReadLimit) ?: return null)
-                head.isOgg() -> oggVorbisLyrics(readPrefix(path, OggReadLimit) ?: return null)
+                head.isOgg() -> oggVorbisLyrics(path)
                 head.isMp4() -> mp4Lyrics(readPrefix(path, Mp4ReadLimit) ?: return null)
                 head.isRiff() || head.isForm() -> riffId3Lyrics(readPrefix(path, RiffReadLimit) ?: return null)
                 else -> null
@@ -86,7 +93,7 @@ internal object EmbeddedTagReader {
             val head = readPrefix(path, MagicReadLimit) ?: return null
             when {
                 head.isFlac() -> flacExtractedTags(readPrefix(path, FlacReadLimit) ?: return null)
-                head.isOgg() -> oggExtractedTags(readPrefix(path, OggReadLimit) ?: return null)
+                head.isOgg() -> oggExtractedTags(path)
                 head.isMp4() -> mp4ExtractedTags(readPrefix(path, Mp4ReadLimit) ?: return null)
                 head.isRiff() || head.isForm() -> riffExtractedTags(readPrefix(path, RiffReadLimit) ?: return null)
                 else -> null
@@ -208,33 +215,73 @@ internal object EmbeddedTagReader {
 
     // ---------------------------------------------------------------- OGG
 
-    private fun oggVorbisLyrics(bytes: ByteArray): String? = oggVorbisComment(bytes)?.let { it.lyrics ?: it.unsynced }
+    private fun oggVorbisLyrics(path: String): String? = oggVorbisComment(path)?.let { it.lyrics ?: it.unsynced }
 
-    private fun oggPicture(bytes: ByteArray): ByteArray? = oggVorbisComment(bytes)?.picture
+    private fun oggPicture(path: String): ByteArray? = oggVorbisComment(path)?.picture
 
-    private fun oggExtractedTags(bytes: ByteArray): EmbeddedTrackTags? = oggVorbisComment(bytes)?.tags?.toVorbisExtractedTags()
+    private fun oggExtractedTags(path: String): EmbeddedTrackTags? = oggVorbisComment(path)?.tags?.toVorbisExtractedTags()
 
-    private fun oggVorbisComment(bytes: ByteArray): VorbisComment? {
-        // Opus streams identify their comment header packet with the ASCII
-        // magic "OpusTags" (no leading type byte); real Vorbis streams use a
-        // 0x03 type byte followed by "vorbis". Detect the stream type from
-        // the first page's "OpusHead"/0x01+"vorbis" identification packet so
-        // the right needle is searched for.
-        val needle = if (bytes.isOpusStream()) {
-            "OpusTags".toByteArray(Charsets.US_ASCII)
-        } else {
-            byteArrayOf(0x03, 'v'.code.toByte(), 'o'.code.toByte(), 'r'.code.toByte(), 'b'.code.toByte(), 'i'.code.toByte(), 's'.code.toByte())
+    /**
+     * Parses the comment header of an Opus ("OpusHead" + "OpusTags") or Vorbis
+     * (0x01/0x03 + "vorbis") stream. The header packets are reassembled from
+     * the Ogg page structure first: large comment packets (embedded artwork,
+     * long lyrics) span many pages, and each page boundary interleaves a page
+     * header that a flat byte scan would splice into the comment data.
+     */
+    private fun oggVorbisComment(path: String): VorbisComment? {
+        val (identification, comment) = File(path).inputStream().buffered().use { oggHeaderPackets(it) } ?: return null
+        val magicSize = when {
+            identification.startsWith(OpusHeadMagic) && comment.startsWith(OpusTagsMagic) -> OpusTagsMagic.size
+            identification.startsWith(VorbisIdMagic) && comment.startsWith(VorbisCommentMagic) -> VorbisCommentMagic.size
+            else -> return null
         }
-        val start = bytes.indexOfNeedle(needle)
-        if (start < 0) return null
-        return bytes.copyOfRange(start + needle.size, bytes.size).vorbisComment()
+        return comment.copyOfRange(magicSize, comment.size).vorbisComment()
     }
 
-    /** Detects Opus (vs. Vorbis) from the "OpusHead" identification packet near the file head. */
-    private fun ByteArray.isOpusStream(): Boolean {
-        val needle = "OpusHead".toByteArray(Charsets.US_ASCII)
-        return indexOfNeedle(needle, limit = minOf(size, 4096)) >= 0
+    /**
+     * Reassembles the first two packets (identification + comment header) of the
+     * file's first logical stream by walking each page's segment table. Pages of
+     * other multiplexed streams are skipped. Reading stops once the comment packet
+     * completes, or returns null past [OggReadLimit] or on a malformed page.
+     */
+    private fun oggHeaderPackets(input: InputStream): Pair<ByteArray, ByteArray>? {
+        val packets = ArrayList<ByteArray>(2)
+        var current = ByteArrayOutputStream()
+        var serial: Int? = null
+        var consumed = 0L
+        while (packets.size < 2) {
+            val header = readUpTo(input, OggPageHeaderSize)
+            if (header.size < OggPageHeaderSize || !header.isOgg()) return null
+            val segmentCount = header[26].toInt() and 0xFF
+            val segments = readUpTo(input, segmentCount)
+            if (segments.size < segmentCount) return null
+            val bodySize = segments.sumOf { it.toInt() and 0xFF }
+            consumed += OggPageHeaderSize + segmentCount + bodySize
+            if (consumed > OggReadLimit) return null
+            val body = readUpTo(input, bodySize)
+            if (body.size < bodySize) return null
+            val pageSerial = header.readUInt32LE(14)
+            if (serial == null) serial = pageSerial
+            if (pageSerial != serial) continue
+            var offset = 0
+            for (segment in segments) {
+                val length = segment.toInt() and 0xFF
+                current.write(body, offset, length)
+                offset += length
+                // A lacing value below 255 terminates the packet; 255 continues it,
+                // possibly onto the next page.
+                if (length < 255) {
+                    packets += current.toByteArray()
+                    current = ByteArrayOutputStream()
+                    if (packets.size == 2) break
+                }
+            }
+        }
+        return packets[0] to packets[1]
     }
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
+        size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
 
     /** Parsed Vorbis-comment block; any of the fields may be null when absent. [tags] holds
      *  every key=value pair (first occurrence per key) for callers that need other fields. */
