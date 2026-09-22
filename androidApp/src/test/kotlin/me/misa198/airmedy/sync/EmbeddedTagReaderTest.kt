@@ -200,6 +200,35 @@ class EmbeddedTagReaderTest {
         assertNull(EmbeddedTagReader.embeddedArtworkBytes(file.path))
     }
 
+    // Fragmented MP4 (saved DASH/CMAF stream): mvhd/mdhd durations are 0 and Android's
+    // parser reports 0, so the length comes from moov > mvex > mehd. Values mirror real
+    // LastWave files verified against ffprobe.
+    @Test fun `fragmented m4a duration from mehd`() {
+        val file = temp("fmp4", fragmentedMp4(timescale = 44_100, fragmentDuration = 11_615_940L)) // "Perfect", 263.4 s
+        assertEquals(263_400L, EmbeddedTagReader.fragmentedMp4DurationMillis(file.path))
+    }
+
+    @Test fun `fragmented m4a duration at a 96 kHz timescale`() {
+        val file = temp("fmp4-96k", fragmentedMp4(timescale = 96_000, fragmentDuration = 21_051_646L)) // ffprobe 219.288 s
+        assertEquals(219_287L, EmbeddedTagReader.fragmentedMp4DurationMillis(file.path))
+    }
+
+    @Test fun `fragmented m4a 64-bit mehd`() {
+        // 13 h at 96 kHz needs more than 32 bits; version-1 mvhd and mehd.
+        val file = temp("fmp4-v1", fragmentedMp4(timescale = 96_000, fragmentDuration = 96_000L * 46_800L, version = 1))
+        assertEquals(46_800_000L, EmbeddedTagReader.fragmentedMp4DurationMillis(file.path))
+    }
+
+    @Test fun `fragmented m4a without mehd returns null`() {
+        val file = temp("fmp4-no-mehd", fragmentedMp4(timescale = 44_100, fragmentDuration = null))
+        assertNull(EmbeddedTagReader.fragmentedMp4DurationMillis(file.path))
+    }
+
+    @Test fun `non-mp4 file has no fragmented duration`() {
+        val file = flac(picture = null, comments = listOf("TITLE=x"))
+        assertNull(EmbeddedTagReader.fragmentedMp4DurationMillis(file.path))
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")
@@ -509,6 +538,68 @@ class EmbeddedTagReaderTest {
         val moov = box("moov", udta)
         val ftyp = box("ftyp", ("M4A ".toByteArray(Charsets.ISO_8859_1) + ByteArray(8)))
         return temp("m4a", ftyp + moov)
+    }
+
+    private fun fullBox(type: String, version: Int, payload: ByteArray): ByteArray =
+        box(type, byteArrayOf(version.toByte(), 0, 0, 0) + payload)
+
+    private fun ByteArrayOutputStream.writeLongBE(value: Long) {
+        for (shift in 56 downTo 0 step 8) write((value ushr shift).toInt() and 0xFF)
+    }
+
+    private fun bytesOf(block: ByteArrayOutputStream.() -> Unit): ByteArray = ByteArrayOutputStream().apply(block).toByteArray()
+
+    /**
+     * A fragmented M4A laid out like the real LastWave files: iso8/cmfc ftyp; moov with
+     * zero-duration mvhd/mdhd, an fLaC sample entry and empty sample tables, mvex (mehd +
+     * trex) and a ~150 KB cover in udta; then moof (mfhd, traf: tfhd, tfdt, trun) + mdat
+     * fragments. [fragmentDuration] null omits mehd.
+     */
+    private fun fragmentedMp4(timescale: Int, fragmentDuration: Long?, version: Int = 0): ByteArray {
+        val ftyp = box("ftyp", "iso8".toByteArray(Charsets.ISO_8859_1) + ByteArray(4) + "mp41dashcmfc".toByteArray(Charsets.ISO_8859_1))
+        val times = if (version == 1) ByteArray(16) else ByteArray(8) // creation + modification
+        val zeroDuration = if (version == 1) ByteArray(8) else ByteArray(4)
+        val mvhd = fullBox("mvhd", version, bytesOf {
+            write(times); writeIntBE(timescale); write(zeroDuration)
+            writeIntBE(0x00010000); write(byteArrayOf(0x01, 0x00)); write(ByteArray(10))
+            write(ByteArray(36)); write(ByteArray(24)); writeIntBE(2)
+        })
+        val mdhd = fullBox("mdhd", version, bytesOf { write(times); writeIntBE(timescale); write(zeroDuration); write(ByteArray(4)) })
+        val fLaC = box("fLaC", bytesOf {
+            write(ByteArray(6)); write(byteArrayOf(0, 1)); write(ByteArray(8))
+            write(byteArrayOf(0, 2, 0, 16)); write(ByteArray(4)); writeIntBE(timescale shl 16)
+            write(fullBox("dfLa", 0, ByteArray(38)))
+        })
+        val stbl = box("stbl",
+            fullBox("stsd", 0, bytesOf { writeIntBE(1); write(fLaC) }) +
+                fullBox("stts", 0, bytesOf { writeIntBE(0) }) + fullBox("stsc", 0, bytesOf { writeIntBE(0) }) +
+                fullBox("stsz", 0, bytesOf { writeIntBE(0); writeIntBE(0) }) + fullBox("stco", 0, bytesOf { writeIntBE(0) }),
+        )
+        val trak = box("trak",
+            fullBox("tkhd", 0, ByteArray(80)) +
+                box("mdia", mdhd + fullBox("hdlr", 0, ByteArray(4) + "soun".toByteArray(Charsets.ISO_8859_1) + ByteArray(13)) +
+                    box("minf", fullBox("smhd", 0, ByteArray(4)) + box("dinf", fullBox("dref", 0, ByteArray(4))) + stbl)),
+        )
+        val mehd = fragmentDuration?.let { duration ->
+            fullBox("mehd", version, bytesOf { if (version == 1) writeLongBE(duration) else writeIntBE(duration.toInt()) })
+        } ?: ByteArray(0)
+        val mvex = box("mvex", mehd + fullBox("trex", 0, bytesOf { writeIntBE(1); writeIntBE(1); writeIntBE(0); writeIntBE(0); writeIntBE(0) }))
+        val udta = box("udta", box("meta", ByteArray(4) + box("hdlr", ByteArray(8)) + box("ilst", covr(ByteArray(150_000) { (it % 251).toByte() }))))
+        val moov = box("moov", mvhd + trak + mvex + udta)
+        val fragments = (0 until 4).fold(ByteArray(0)) { acc, index ->
+            val sampleCount = 8
+            val sampleSize = 64
+            // flags 0x000301: data-offset, per-sample duration and size present.
+            val trun = box("trun", bytesOf {
+                write(byteArrayOf(0, 0x00, 0x03, 0x01)); writeIntBE(sampleCount); writeIntBE(0)
+                repeat(sampleCount) { writeIntBE(4096); writeIntBE(sampleSize) }
+            })
+            val traf = box("traf", fullBox("tfhd", 0, bytesOf { writeIntBE(1) }) +
+                fullBox("tfdt", 1, bytesOf { writeLongBE(index * 32_768L) }) + trun)
+            acc + box("moof", fullBox("mfhd", 0, bytesOf { writeIntBE(index + 1) }) + traf) +
+                box("mdat", ByteArray(sampleCount * sampleSize) { 0x55 })
+        }
+        return ftyp + moov + fragments
     }
 
     private fun covr(imageBytes: ByteArray): ByteArray {

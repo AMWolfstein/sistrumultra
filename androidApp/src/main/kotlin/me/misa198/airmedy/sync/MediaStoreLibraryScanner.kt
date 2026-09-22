@@ -236,7 +236,8 @@ internal class MediaStoreLibraryScanner(
 
     /** Some .opus encoders never finalize the Ogg granule/seek position, so MediaStore
      *  reports 0 (or an implausible sub-1s value) for DURATION; fall back to decoding
-     *  the file's own duration in that case. */
+     *  the file's own duration in that case. Fragmented MP4/M4A files read as 0 through
+     *  both MediaStore and MediaMetadataRetriever, so their `mehd` box is read directly. */
     private fun durationMillisOf(mediaStoreDurationMillis: Long?, path: String): Long {
         val reported = mediaStoreDurationMillis?.coerceAtLeast(0L) ?: 0L
         if (reported >= MinimumPlausibleDurationMillis) return reported
@@ -245,7 +246,9 @@ internal class MediaStoreLibraryScanner(
                 retriever.setDataSource(path)
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
             }
-        }.getOrNull()?.takeIf { it > 0 } ?: reported
+        }.getOrNull()?.takeIf { it > 0 }
+            ?: EmbeddedTagReader.fragmentedMp4DurationMillis(path)
+            ?: reported
     }
 
     /**

@@ -528,6 +528,78 @@ internal object EmbeddedTagReader {
         return String(copyOfRange(payloadStart, box.end), Charsets.UTF_8).trim('\u0000', ' ')
     }
 
+    /**
+     * Length of a fragmented MP4/M4A (e.g. a saved DASH/CMAF stream) from `moov > mvex > mehd`:
+     * `fragment_duration` in the `mvhd` timescale. Such files carry zero `mvhd`/`mdhd`
+     * durations with the samples in `moof`/`mdat` fragments, and Android's own parser
+     * (MediaStore and MediaMetadataRetriever) reports their duration as 0. Null when the
+     * file is not MP4 or has no `mehd`.
+     */
+    fun fragmentedMp4DurationMillis(path: String): Long? = runCatching {
+        val head = readPrefix(path, MagicReadLimit) ?: return null
+        if (!head.isMp4()) return null
+        // TODO: a fragmented file without mehd could fall back to summing the
+        // moof > traf > trun sample durations; no such file has turned up yet.
+        readTopLevelMp4Box(path, "moov")?.mehdDurationMillis()
+    }.getOrNull()
+
+    /** Payload of the first top-level box of [type], found by walking box headers only,
+     *  so the (possibly many, large) `moof`/`mdat` fragments are skipped, not read. */
+    private fun readTopLevelMp4Box(path: String, type: String): ByteArray? =
+        java.io.RandomAccessFile(path, "r").use { file ->
+            val length = file.length()
+            val header = ByteArray(16)
+            var pos = 0L
+            while (pos + 8 <= length) {
+                file.seek(pos)
+                file.readFully(header, 0, 8)
+                val size32 = header.readUInt32BE(0).toLong() and 0xFFFFFFFFL
+                var headerSize = 8
+                val size = when (size32) {
+                    1L -> {
+                        if (pos + 16 > length) return null
+                        file.readFully(header, 8, 8)
+                        headerSize = 16
+                        header.readUInt64BE(8)
+                    }
+                    0L -> length - pos
+                    else -> size32
+                }
+                if (size < headerSize || pos + size > length) return null
+                if (String(header, 4, 4, Charsets.ISO_8859_1) == type) {
+                    val payloadSize = size - headerSize
+                    if (payloadSize > Mp4ReadLimit) return null
+                    return ByteArray(payloadSize.toInt()).also { payload ->
+                        file.seek(pos + headerSize)
+                        file.readFully(payload)
+                    }
+                }
+                pos += size
+            }
+            null
+        }
+
+    /** `mehd` fragment_duration (32-bit in version 0, 64-bit in version 1) over the `mvhd` timescale. */
+    private fun ByteArray.mehdDurationMillis(): Long? {
+        val children = mp4Boxes(0, size)
+        val mvhd = children.firstOrNull { it.type == "mvhd" } ?: return null
+        // version/flags, then creation + modification times (32-bit in v0, 64-bit in v1).
+        val timescaleOffset = mvhd.start + if (this[mvhd.start].toInt() == 1) 20 else 12
+        if (timescaleOffset + 4 > mvhd.end) return null
+        val timescale = readUInt32BE(timescaleOffset).toLong() and 0xFFFFFFFFL
+        val mvex = children.firstOrNull { it.type == "mvex" } ?: return null
+        val mehd = mp4Boxes(mvex.start, mvex.end).firstOrNull { it.type == "mehd" } ?: return null
+        val fragmentDuration = if (this[mehd.start].toInt() == 1) {
+            if (mehd.start + 12 > mehd.end) return null
+            readUInt64BE(mehd.start + 4)
+        } else {
+            if (mehd.start + 8 > mehd.end) return null
+            readUInt32BE(mehd.start + 4).toLong() and 0xFFFFFFFFL
+        }
+        if (timescale <= 0 || fragmentDuration <= 0) return null
+        return fragmentDuration * 1000 / timescale
+    }
+
     // ---------------------------------------------------------------- RIFF / AIFF
 
     /** Embedded ID3v2 tag carried by a WAV `id3 ` or AIFF `ID3 ` chunk, or null. */
