@@ -7,13 +7,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.booleanOrNull
 import me.misa198.airmedy.player.PlaybackController
 import me.misa198.airmedy.player.PlaybackRequest
 import me.misa198.airmedy.sync.AndroidLibrarySyncStore
 import me.misa198.airmedy.sync.LibraryPlaylist
 import me.misa198.airmedy.sync.LibraryTrack
+import me.misa198.airmedy.sync.durationMillis
 import me.misa198.airmedy.sync.metadataObject
 import me.misa198.airmedy.sync.PlaylistMutation
 import me.misa198.airmedy.sync.PlaylistMutationOperation
@@ -129,12 +129,10 @@ internal fun playlistDetailsUiStateFor(
 internal fun LibraryTrack.isFavorite(): Boolean = (metadataObject()?.get("is_favorite") as? kotlinx.serialization.json.JsonPrimitive)
     ?.booleanOrNull == true
 
-internal fun playlistTotalDurationSeconds(tracks: List<LibraryTrack>): Long = tracks.sumOf { track ->
-    (track.metadataObject()?.get("duration") as? kotlinx.serialization.json.JsonPrimitive)
-        ?.longOrNull
-        ?.coerceAtLeast(0L)
-        ?: 0L
-}
+/** Sums the tracks' millisecond durations, converting to seconds once at the end so
+ *  per-track truncation doesn't accumulate. */
+internal fun playlistTotalDurationSeconds(tracks: List<LibraryTrack>): Long =
+    tracks.sumOf { track -> track.durationMillis() ?: 0L } / 1000
 
 internal fun formatPlaylistTotalDuration(
     totalSeconds: Long,

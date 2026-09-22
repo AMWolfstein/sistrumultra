@@ -57,11 +57,21 @@ class AlbumDetailsViewModelTest {
         assertEquals(1, request.startIndex)
     }
 
+    /** Real millisecond durations from a device scan (3:36 + 3:00.5) total 6:36, not ~110 hours. */
+    @Test
+    fun totalDurationReadsMillisecondMetadata() {
+        val tracks = listOf(
+            LibraryTrack("one", "One", "Artist", metadataJson = """{"duration":216127}"""),
+            LibraryTrack("two", "Two", "Artist", metadataJson = """{"duration":180500}"""),
+        )
+        assertEquals(396L, albumTotalDurationSeconds(tracks))
+    }
+
     @Test
     fun sumsNonNegativeTrackDurationsAndFormatsLikeDesktop() {
         val tracks = listOf(
-            LibraryTrack("one", "One", "Artist", metadataJson = """{"duration":61}"""),
-            LibraryTrack("two", "Two", "Artist", metadataJson = """{"duration":3660}"""),
+            LibraryTrack("one", "One", "Artist", metadataJson = """{"duration":61000}"""),
+            LibraryTrack("two", "Two", "Artist", metadataJson = """{"duration":3660000}"""),
             LibraryTrack("invalid", "Invalid", "Artist", metadataJson = """{"duration":-1}"""),
         )
         val day = { value: Long -> "$value d" }

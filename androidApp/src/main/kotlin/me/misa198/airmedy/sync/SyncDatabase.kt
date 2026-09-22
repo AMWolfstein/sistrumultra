@@ -511,6 +511,20 @@ fun LibraryTrack.metadataObject(): JsonObject? = runCatching {
     LibrarySyncProtocol.json.parseToJsonElement(metadataJson) as? JsonObject
 }.getOrNull()
 
+/** Positive track length from the "duration" metadata, which holds LocalTrack.durationMillis
+ *  (milliseconds, not seconds); null when absent or not positive. */
+fun LibraryTrack.durationMillis(): Long? = (metadataObject()?.get("duration") as? JsonPrimitive)
+    ?.contentOrNull?.toDoubleOrNull()?.toLong()?.takeIf { it > 0 }
+
+/** Lyrics lookup input. [LyricsTrack.duration] is whole seconds (LRCLIB takes seconds;
+ *  Kugou's provider converts to milliseconds itself), rounded from [durationMillis]. */
+internal fun LibraryTrack.toLyricsTrack(): LyricsTrack {
+    val metadata = metadataObject()
+    val artist = ((metadata?.get("artists") as? JsonArray)?.firstOrNull() as? JsonObject)?.string("name").orEmpty().ifBlank { artists.substringBefore(',').trim() }
+    val durationSeconds = durationMillis()?.let { ((it + 500) / 1000).toInt() } ?: 0
+    return LyricsTrack(title, artist, album, durationSeconds, audioPath = audioPath.orEmpty())
+}
+
 data class LibraryArtist(
     val id: String,
     val name: String,
@@ -821,11 +835,7 @@ internal class AndroidLibrarySyncStore(
 
     fun providerLyrics(trackId: String): Flow<String?> = dao.observeProviderLyrics(trackId)
     suspend fun saveProviderLyrics(trackId: String, content: String, source: String) = dao.insertProviderLyric(ProviderLyricEntity(trackId, content, source))
-    suspend fun lyricsTrack(trackId: String): LyricsTrack? = tracks.first().firstOrNull { it.id == trackId }?.let { track ->
-        val metadata = track.metadataObject()
-        val artist = ((metadata?.get("artists") as? JsonArray)?.firstOrNull() as? JsonObject)?.string("name").orEmpty().ifBlank { track.artists.substringBefore(',').trim() }
-        LyricsTrack(track.title, artist, track.album, metadata?.get("duration")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0, audioPath = track.audioPath.orEmpty())
-    }
+    suspend fun lyricsTrack(trackId: String): LyricsTrack? = tracks.first().firstOrNull { it.id == trackId }?.toLyricsTrack()
 
     override suspend fun prepare(request: LibrarySyncRequest, manifest: LibrarySyncManifest) {
         database.withTransaction {

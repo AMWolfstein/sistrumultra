@@ -7,8 +7,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PlaylistDetailsViewModelTest {
-    private val first = LibraryTrack("first", "First", "Artist", metadataJson = """{"duration":61}""")
-    private val second = LibraryTrack("second", "Second", "Artist", metadataJson = """{"duration":3660}""")
+    private val first = LibraryTrack("first", "First", "Artist", metadataJson = """{"duration":61000}""")
+    private val second = LibraryTrack("second", "Second", "Artist", metadataJson = """{"duration":3660000}""")
 
     @Test
     fun resolvesTracksInPlaylistOrderAndSkipsUnavailableIds() {
@@ -21,6 +21,14 @@ class PlaylistDetailsViewModelTest {
 
         assertEquals(listOf("second", "first"), result.tracks.map { it.id })
         assertEquals(3721L, playlistTotalDurationSeconds(result.tracks))
+    }
+
+    /** "duration" is LocalTrack.durationMillis; summing it as seconds showed totals ~1000x too long. */
+    @Test
+    fun totalDurationConvertsMillisecondsOnceAfterSumming() {
+        val halfSecondTracks = List(3) { LibraryTrack("t$it", "T", "Artist", metadataJson = """{"duration":1500}""") }
+        // 4500 ms -> 4 s; converting per track would truncate each to 1 s and give 3.
+        assertEquals(4L, playlistTotalDurationSeconds(halfSecondTracks))
     }
 
     @Test
