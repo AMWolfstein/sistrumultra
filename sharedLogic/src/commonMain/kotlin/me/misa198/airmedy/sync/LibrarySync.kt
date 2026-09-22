@@ -140,6 +140,10 @@ object LibrarySyncProtocol {
         "airmedy/library-sync/v1/$desktopId/$mobileId/request"
 }
 
+// Unused now that desktop sync is gone (see AndroidSyncRuntime's doc comment) — no
+// production call site constructs a LibrarySyncCoordinator. Kept for now because
+// LibrarySyncStore/LibrarySyncAsset/PulledAsset etc. below are still implemented by
+// AndroidLibrarySyncStore. Candidate for a dedicated cleanup pass.
 class LibrarySyncCoordinator(
     private val identityProvider: PairingIdentityProvider,
     private val clock: LibrarySyncClock,

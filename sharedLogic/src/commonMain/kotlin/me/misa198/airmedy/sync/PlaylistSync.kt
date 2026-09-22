@@ -139,6 +139,11 @@ fun PlaylistMutationStatus.isTerminal(): Boolean = this in setOf(
     PlaylistMutationStatus.REJECTED, PlaylistMutationStatus.SCOPE_CONFLICT,
 )
 
+// Unused now that desktop sync is gone (see AndroidSyncRuntime's doc comment) — no
+// production call site constructs a PlaylistReconciliationCoordinator. Kept for now
+// because PlaylistMutationStore/PlaylistArtworkStagingStore/StagedPlaylistArtwork
+// etc. below are still implemented/used by AndroidLibrarySyncStore. Candidate for a
+// dedicated cleanup pass.
 class PlaylistReconciliationCoordinator(
     private val identityProvider: PairingIdentityProvider,
     private val clock: PlaylistReconciliationClock,

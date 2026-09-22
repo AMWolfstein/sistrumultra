@@ -4,6 +4,11 @@ package me.misa198.airmedy.pairing
  * Identity and trust contracts retained for playlist mutation reconciliation.
  * The QR pairing/MQTT surface was removed; these types now only describe the
  * local device identity and the desktop peer that reconcile requests target.
+ *
+ * As of desktop sync's removal (see AndroidSyncRuntime's doc comment), nothing
+ * in this file is referenced outside sync/LibrarySync.kt's LibrarySyncCoordinator
+ * and sync/PlaylistSync.kt's PlaylistReconciliationCoordinator, both themselves
+ * unused. Candidate for a dedicated cleanup pass alongside those two.
  */
 data class MobileIdentity(val id: String, val name: String, val platform: String, val publicKey: ByteArray)
 

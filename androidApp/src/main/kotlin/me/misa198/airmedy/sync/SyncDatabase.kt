@@ -695,12 +695,25 @@ internal class AndroidLibrarySyncStore(
         ?.let(dao::observeSearchCandidates)
         ?: flowOf(emptyList())
 
-    /** Durable boundary for playlist mutations; list browsing remains read-only for now. */
+    /**
+     * Durable boundary for playlist mutations; list browsing remains read-only for now.
+     *
+     * Nothing ever calls acknowledgePlaylistMutations()/activate() now that desktop
+     * sync is gone (see AndroidSyncRuntime's doc comment) — track favorite state and
+     * playlist membership are read entirely by projecting *every* still-pending
+     * mutation (see the `tracks`/`playlists` Flows above), so old ones can't simply be
+     * deleted without losing state. Instead, an operation that repeats on the same
+     * target (toggling a favorite, re-adding/removing the same track, re-ordering,
+     * renaming, re-setting artwork) is given a stable id, so Room's existing REPLACE
+     * conflict strategy collapses repeats into one row instead of growing this table
+     * without bound. CREATE/DELETE are one-shot per playlist and keep a random id.
+     */
     suspend fun queuePlaylistMutation(mutation: PlaylistMutation) {
         require(mutation.validationError() == null) { mutation.validationError() ?: "Invalid playlist mutation" }
+        val mutationId = mutation.dedupeMutationId() ?: mutation.mutationId
         dao.insertPlaylistMutation(
             PlaylistMutationEntity(
-                mutation.mutationId,
+                mutationId,
                 mutation.playlistId,
                 mutation.operation.name,
                 mutation.updatedAt,
@@ -709,7 +722,7 @@ internal class AndroidLibrarySyncStore(
         )
     }
 
-    /** Applies the desired favorite state optimistically; the durable delta is reconciled on the next desktop Sync. */
+    /** Applies the desired favorite state optimistically. */
     suspend fun setFavorite(trackId: String, favorite: Boolean) {
         val mutation = PlaylistMutation(
             mutationId = UUID.randomUUID().toString(),
@@ -1460,6 +1473,16 @@ internal fun cachedAssetPath(filesDir: File, asset: SyncAssetEntity?): String? =
     ?.relativePath
     ?.takeIf { !it.startsWith('/') && ".." !in it.split('/') }
     ?.takeIf { File(filesDir, it).isFile }
+
+/** See queuePlaylistMutation's doc comment. Null means "keep the caller's random id". */
+private fun PlaylistMutation.dedupeMutationId(): String? = when (operation) {
+    PlaylistMutationOperation.SET_FAVORITE -> "dedupe:favorite:${payload.trackId}"
+    PlaylistMutationOperation.ADD_TRACK, PlaylistMutationOperation.REMOVE_TRACK -> "dedupe:member:$playlistId:${payload.trackId}"
+    PlaylistMutationOperation.MOVE_TRACK -> "dedupe:move:$playlistId:${payload.trackId}"
+    PlaylistMutationOperation.SET_ARTWORK, PlaylistMutationOperation.REMOVE_ARTWORK -> "dedupe:artwork:$playlistId"
+    PlaylistMutationOperation.UPDATE -> "dedupe:update:$playlistId"
+    PlaylistMutationOperation.CREATE, PlaylistMutationOperation.DELETE -> null
+}
 
 private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
 
