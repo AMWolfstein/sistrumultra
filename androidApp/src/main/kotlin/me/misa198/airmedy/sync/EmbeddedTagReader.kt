@@ -25,6 +25,21 @@ import java.io.InputStream
  *
  * Only a bounded prefix of each file is read (tags live at the file head).
  */
+/**
+ * Supplementary tag values extracted alongside artwork/lyrics. [releaseDate] is an
+ * ISO date string only when the source tag carries more than a bare year (e.g. ID3
+ * `TDRC`/legacy `TYER`+`TDAT`+`TIME`, or Vorbis-comment `DATE`); otherwise it is null
+ * and [year] alone is populated.
+ */
+internal data class EmbeddedTrackTags(
+    val releaseDate: String? = null,
+    val year: Int? = null,
+    val bpm: Int? = null,
+    val label: String? = null,
+    val isrc: String? = null,
+    val copyright: String? = null,
+)
+
 internal object EmbeddedTagReader {
 
     private const val FlacReadLimit = 8 * 1024 * 1024
@@ -58,6 +73,22 @@ internal object EmbeddedTagReader {
                 head.isOgg() -> oggVorbisLyrics(readPrefix(path, OggReadLimit) ?: return null)
                 head.isMp4() -> mp4Lyrics(readPrefix(path, Mp4ReadLimit) ?: return null)
                 head.isRiff() || head.isForm() -> riffId3Lyrics(readPrefix(path, RiffReadLimit) ?: return null)
+                else -> null
+            }
+        }
+    }.getOrNull()
+
+    /** Release date/year, BPM, label, ISRC, and copyright read from the file's own tags. */
+    fun embeddedTrackTags(path: String): EmbeddedTrackTags? = runCatching {
+        if (id3Magic(path)) {
+            id3ExtractedTags(readPrefix(path, Id3ReadLimit) ?: return null)
+        } else {
+            val head = readPrefix(path, MagicReadLimit) ?: return null
+            when {
+                head.isFlac() -> flacExtractedTags(readPrefix(path, FlacReadLimit) ?: return null)
+                head.isOgg() -> oggExtractedTags(readPrefix(path, OggReadLimit) ?: return null)
+                head.isMp4() -> mp4ExtractedTags(readPrefix(path, Mp4ReadLimit) ?: return null)
+                head.isRiff() || head.isForm() -> riffExtractedTags(readPrefix(path, RiffReadLimit) ?: return null)
                 else -> null
             }
         }
@@ -155,11 +186,33 @@ internal object EmbeddedTagReader {
         return null
     }
 
+    private fun flacExtractedTags(bytes: ByteArray): EmbeddedTrackTags? {
+        var offset = 4
+        var block = 0
+        while (offset + 4 <= bytes.size && block < 256) {
+            val type = bytes[offset].toInt() and 0x7F
+            val last = bytes[offset].toInt() and 0x80 != 0
+            val length = bytes.readUInt24BE(offset + 1)
+            val payloadStart = offset + 4
+            val payloadEnd = payloadStart + length
+            if (payloadEnd > bytes.size) return null
+            if (type == 4) bytes.copyOfRange(payloadStart, payloadEnd).vorbisComment()?.let {
+                return it.tags.toVorbisExtractedTags()
+            }
+            if (last) return null
+            offset = payloadEnd
+            block++
+        }
+        return null
+    }
+
     // ---------------------------------------------------------------- OGG
 
     private fun oggVorbisLyrics(bytes: ByteArray): String? = oggVorbisComment(bytes)?.let { it.lyrics ?: it.unsynced }
 
     private fun oggPicture(bytes: ByteArray): ByteArray? = oggVorbisComment(bytes)?.picture
+
+    private fun oggExtractedTags(bytes: ByteArray): EmbeddedTrackTags? = oggVorbisComment(bytes)?.tags?.toVorbisExtractedTags()
 
     private fun oggVorbisComment(bytes: ByteArray): VorbisComment? {
         // Opus streams identify their comment header packet with the ASCII
@@ -183,8 +236,9 @@ internal object EmbeddedTagReader {
         return indexOfNeedle(needle, limit = minOf(size, 4096)) >= 0
     }
 
-    /** Parsed Vorbis-comment block; any of the fields may be null when absent. */
-    private class VorbisComment(val lyrics: String?, val unsynced: String?, val picture: ByteArray?)
+    /** Parsed Vorbis-comment block; any of the fields may be null when absent. [tags] holds
+     *  every key=value pair (first occurrence per key) for callers that need other fields. */
+    private class VorbisComment(val lyrics: String?, val unsynced: String?, val picture: ByteArray?, val tags: Map<String, String>)
 
     /** Vorbis-comment block: vendor (LE), vendor data, count (LE), then "key=value" pairs. */
     private fun ByteArray.vorbisComment(): VorbisComment? {
@@ -198,6 +252,7 @@ internal object EmbeddedTagReader {
         var lyrics: String? = null
         var unsynced: String? = null
         var picture: ByteArray? = null
+        val tags = linkedMapOf<String, String>()
         repeat(count) {
             if (pos + 4 > size) return@repeat
             val length = readUInt32LE(pos); pos += 4
@@ -220,9 +275,24 @@ internal object EmbeddedTagReader {
                     "UNSYNCEDLYRICS" -> if (unsynced == null) unsynced = entryValue
                     "METADATA_BLOCK_PICTURE" -> if (picture == null) picture = entryValue.decodePictureBlock()
                 }
+                if (key.isNotEmpty() && key !in tags) tags[key] = entryValue
             }
         }
-        return VorbisComment(lyrics, unsynced, picture)
+        return VorbisComment(lyrics, unsynced, picture, tags)
+    }
+
+    /** Vorbis-comment DATE/YEAR (FLAC/OGG/Opus) -> the shared [EmbeddedTrackTags]. */
+    private fun Map<String, String>.toVorbisExtractedTags(): EmbeddedTrackTags {
+        fun firstOf(vararg keys: String): String? = keys.firstNotNullOfOrNull { key -> this[key]?.trim()?.takeIf(String::isNotEmpty) }
+        val dateRaw = firstOf("DATE", "YEAR")
+        return EmbeddedTrackTags(
+            releaseDate = dateRaw?.takeIf { it.length > 4 },
+            year = dateRaw?.let(::parseTagYear),
+            bpm = firstOf("BPM")?.let(::parseTagBpm),
+            label = firstOf("LABEL", "PUBLISHER"),
+            isrc = firstOf("ISRC"),
+            copyright = firstOf("COPYRIGHT"),
+        )
     }
 
     /** `METADATA_BLOCK_PICTURE` values are base64-encoded FLAC-style pictures (RFC 7845). */
@@ -329,6 +399,54 @@ internal object EmbeddedTagReader {
         return lyricText ?: itunesLyrics
     }
 
+    private fun mp4ExtractedTags(bytes: ByteArray): EmbeddedTrackTags? {
+        val (start, end) = bytes.mp4IlstRegion() ?: return null
+        var dateRaw: String? = null
+        var bpmRaw: String? = null
+        var label: String? = null
+        var isrc: String? = null
+        var copyright: String? = null
+        for (item in bytes.mp4Boxes(start, end)) {
+            when (item.type) {
+                "©day" -> if (dateRaw == null) dateRaw = bytes.mp4DataText(item.start, item.end)
+                "tmpo" -> if (bpmRaw == null) bpmRaw = bytes.mp4TmpoText(item.start, item.end)
+                "cprt" -> if (copyright == null) copyright = bytes.mp4DataText(item.start, item.end)
+                "----" -> {
+                    // iTunes free-form: mean=com.apple.iTunes, name=LABEL/PUBLISHER/ISRC/COPYRIGHT.
+                    val key = bytes.mp4FreeformKey(item.start, item.end)?.substringAfterLast('.')?.uppercase()
+                    val value = bytes.mp4DataText(item.start, item.end)
+                    if (key != null && value != null) {
+                        when (key) {
+                            "LABEL", "PUBLISHER" -> if (label == null) label = value
+                            "ISRC" -> if (isrc == null) isrc = value
+                            "COPYRIGHT" -> if (copyright == null) copyright = value
+                        }
+                    }
+                }
+            }
+        }
+        return EmbeddedTrackTags(
+            releaseDate = dateRaw?.takeIf { it.length > 4 },
+            year = dateRaw?.let(::parseTagYear),
+            bpm = bpmRaw?.let(::parseTagBpm),
+            label = label,
+            isrc = isrc,
+            copyright = copyright,
+        )
+    }
+
+    /** `tmpo`'s `data` atom holds a big-endian 16-bit integer BPM, not text. */
+    private fun ByteArray.mp4TmpoText(start: Int, end: Int): String? {
+        for (data in mp4Boxes(start, end)) {
+            if (data.type != "data") continue
+            val payloadStart = data.start + 8
+            if (payloadStart + 2 > data.end) continue
+            val value = ((this[payloadStart].toInt() and 0xFF) shl 8) or (this[payloadStart + 1].toInt() and 0xFF)
+            if (value > 0) return value.toString()
+        }
+        return null
+    }
+
     /** First non-empty utf-8 text from a `data` atom (skips version/flags + locale). */
     private fun ByteArray.mp4DataText(start: Int, end: Int): String? {
         for (data in mp4Boxes(start, end)) {
@@ -386,6 +504,8 @@ internal object EmbeddedTagReader {
     private fun riffId3Picture(bytes: ByteArray): ByteArray? = riffId3Tag(bytes)?.let { id3Apic(it) }
 
     private fun riffId3Lyrics(bytes: ByteArray): String? = riffId3Tag(bytes)?.let { id3Uslt(it) }
+
+    private fun riffExtractedTags(bytes: ByteArray): EmbeddedTrackTags? = riffId3Tag(bytes)?.let { id3ExtractedTags(it) }
 
     // ---------------------------------------------------------------- ID3v2
 
@@ -457,6 +577,88 @@ internal object EmbeddedTagReader {
             }
         }
         return null
+    }
+
+    /** v2.3/2.4 (4-char) text-information frame id -> canonical key used by [EmbeddedTrackTags]. */
+    private val Id3TextFrameKeysV24 = setOf("TDRC", "TYER", "TDAT", "TIME", "TBPM", "TPUB", "TSRC", "TCOP")
+
+    /** v2.2 (3-char) text-information frame id -> its v2.3/2.4 canonical equivalent. */
+    private val Id3TextFrameKeysV22 = mapOf(
+        "TYE" to "TYER", "TDA" to "TDAT", "TIM" to "TIME",
+        "TBP" to "TBPM", "TPB" to "TPUB", "TRC" to "TSRC", "TCR" to "TCOP",
+    )
+
+    private fun id3ExtractedTags(bytes: ByteArray): EmbeddedTrackTags? {
+        val (body, major) = bytes.id3Body() ?: return null
+        val values = linkedMapOf<String, String>()
+        var pos = 0
+        var frames = 0
+        if (major == 2) {
+            while (pos + 6 <= body.size && frames < 512) {
+                val id = String(body, pos, 3, Charsets.ISO_8859_1)
+                val length = body.readUInt24BE(pos + 3)
+                val dataStart = pos + 6
+                val dataEnd = dataStart + length
+                if (dataEnd > body.size) break
+                val canonical = Id3TextFrameKeysV22[id]
+                if (canonical != null && canonical !in values) {
+                    body.copyOfRange(dataStart, dataEnd).parseId3TextFrame()?.let { values[canonical] = it }
+                }
+                pos = dataEnd
+                frames++
+            }
+        } else {
+            while (pos + 10 <= body.size && frames < 512) {
+                val id = String(body, pos, 4, Charsets.ISO_8859_1)
+                if (id == "\u0000\u0000\u0000\u0000") break
+                val syncSafe = major == 4
+                val length = if (syncSafe) body.syncsafeInt(pos + 4) else body.readUInt32BE(pos + 4)
+                val flags = ((body[pos + 8].toInt() and 0xFF) shl 8) or (body[pos + 9].toInt() and 0xFF)
+                val dataStart = pos + 10
+                val rawEnd = dataStart + length.coerceAtMost(body.size - dataStart)
+                var data = body.copyOfRange(dataStart, rawEnd)
+                if (major == 4 && flags and 0x0002 != 0) data = data.unsync()
+                if (id in Id3TextFrameKeysV24 && id !in values) {
+                    data.parseId3TextFrame()?.let { values[id] = it }
+                }
+                pos = rawEnd
+                frames++
+            }
+        }
+        val tdrc = values["TDRC"]
+        val legacyDate = legacyDateFrom(values["TYER"], values["TDAT"], values["TIME"])
+        val dateRaw = tdrc ?: legacyDate
+        return EmbeddedTrackTags(
+            releaseDate = when {
+                tdrc != null && tdrc.length > 4 -> tdrc
+                legacyDate != null -> legacyDate
+                else -> null
+            },
+            year = dateRaw?.let(::parseTagYear),
+            bpm = values["TBPM"]?.let(::parseTagBpm),
+            label = values["TPUB"],
+            isrc = values["TSRC"],
+            copyright = values["TCOP"],
+        )
+    }
+
+    /** Text-information frame: `<encoding byte><text>`, no length-prefixed terminator required. */
+    private fun ByteArray.parseId3TextFrame(): String? {
+        if (isEmpty()) return null
+        val encoding = this[0].toInt() and 0xFF
+        if (encoding > 3) return null
+        val text = decodeUsltText(copyOfRange(1, size), encoding)
+        return text.trim('\u0000', ' ').takeIf(String::isNotEmpty)
+    }
+
+    /** Legacy v2.3 date split across TYER (year) + TDAT (DDMM) [+ TIME (HHMM)]. */
+    private fun legacyDateFrom(year: String?, date: String?, time: String?): String? {
+        val y = year?.trim()?.takeIf { it.length == 4 && it.all(Char::isDigit) } ?: return null
+        val d = date?.trim()?.takeIf { it.length == 4 && it.all(Char::isDigit) } ?: return null
+        val day = d.substring(0, 2)
+        val month = d.substring(2, 4)
+        val t = time?.trim()?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+        return if (t != null) "$y-$month-${day}T${t.substring(0, 2)}:${t.substring(2, 4)}:00" else "$y-$month-$day"
     }
 
     /** Splits the tag into its frame payload, honouring v2.3 tag-level unsynchronisation. */
@@ -634,6 +836,16 @@ internal object EmbeddedTagReader {
         return -1
     }
 }
+
+/** Leading 4-digit year from a date-ish tag value ("2023", "2023-05-01", ...). */
+private fun parseTagYear(raw: String): Int? {
+    val trimmed = raw.trim()
+    if (trimmed.length < 4) return null
+    return trimmed.take(4).toIntOrNull()?.takeIf { it in 1000..9999 }
+}
+
+/** BPM tag value, tolerating a fractional form ("128.00"). */
+private fun parseTagBpm(raw: String): Int? = raw.trim().toDoubleOrNull()?.toInt()?.takeIf { it > 0 }
 
 // ---------------------------------------------------------------- primitives
 

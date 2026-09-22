@@ -69,6 +69,10 @@ data class LocalTrack(
     val bitDepth: Int = 0,
     val codec: String = "",
     val fileSize: Long = 0L,
+    val releaseDate: String = "",
+    val bpm: Int = 0,
+    val label: String = "",
+    val isrc: String = "",
 )
 
 data class LocalLibrarySnapshot(
@@ -98,6 +102,12 @@ object LocalLibraryJson {
         if (track.bitDepth > 0) put("bit_depth", track.bitDepth)
         if (track.codec.isNotBlank()) put("codec", track.codec)
         if (track.fileSize > 0L) put("file_size", track.fileSize)
+        if (track.album.year > 0) put("year", track.album.year)
+        if (track.releaseDate.isNotBlank()) put("release_date", track.releaseDate)
+        if (track.bpm > 0) put("bpm", track.bpm)
+        if (track.label.isNotBlank()) put("label", track.label)
+        if (track.isrc.isNotBlank()) put("isrc", track.isrc)
+        if (track.album.copyright.isNotBlank()) put("copyright", track.album.copyright)
         put("artists", buildJsonArray {
             track.artists.forEachValid { add(it.toJson()) }
         })

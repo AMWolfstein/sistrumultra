@@ -82,6 +82,7 @@ internal class MediaStoreLibraryScanner(
                 val dateModified = number(ColumnDateModified) ?: 0L
                 val size = number(ColumnSize) ?: 0L
                 val mime = text(ColumnMimeType) ?: ""
+                val embeddedTags = EmbeddedTagReader.embeddedTrackTags(data)
                 if (size > 0L) {
                     audio[trackId] = LocalScanAudio(
                         trackId = trackId,
@@ -104,7 +105,7 @@ internal class MediaStoreLibraryScanner(
                         title = albumName,
                         artworkKey = "album-$key",
                         year = 0,
-                        copyright = "",
+                        copyright = embeddedTags?.copyright.orEmpty(),
                         createdAt = isoDate(dateAdded),
                     ),
                     albumArtists = artistsOf(artistName),
@@ -126,6 +127,10 @@ internal class MediaStoreLibraryScanner(
                     bitDepth = number(ColumnBitsPerSample)?.toInt() ?: 0,
                     codec = mime.substringAfter("audio/", mime),
                     fileSize = size,
+                    releaseDate = embeddedTags?.releaseDate.orEmpty(),
+                    bpm = embeddedTags?.bpm ?: 0,
+                    label = embeddedTags?.label.orEmpty(),
+                    isrc = embeddedTags?.isrc.orEmpty(),
                 )
             }
         }
