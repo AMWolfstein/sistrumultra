@@ -76,6 +76,7 @@ internal class MediaStoreLibraryScanner(
                 if (title.isBlank()) continue
                 val trackId = "local:$mediaId"
                 val artistName = text(ColumnArtist) ?: ""
+                val albumArtistName = text(ColumnAlbumArtist)?.takeIf(String::isNotBlank) ?: artistName
                 val albumName = text(ColumnAlbum) ?: ""
                 val key = albumKey(text(ColumnAlbumKey), artistName, albumName)
                 val dateAdded = number(ColumnDateAdded) ?: 0L
@@ -83,6 +84,11 @@ internal class MediaStoreLibraryScanner(
                 val size = number(ColumnSize) ?: 0L
                 val mime = text(ColumnMimeType) ?: ""
                 val embeddedTags = EmbeddedTagReader.embeddedTrackTags(data)
+                // Some OEMs report MediaStore.Audio.Media.TRACK as discNumber * 1000 +
+                // trackNumber instead of the plain track number (e.g. 1001..1009 for a
+                // single-disc, 12-track album).
+                val rawTrack = number(ColumnTrackNumber) ?: 0L
+                val trackNumber = if (rawTrack > 1000) (rawTrack % 1000).toInt() else rawTrack.toInt()
                 if (size > 0L) {
                     audio[trackId] = LocalScanAudio(
                         trackId = trackId,
@@ -104,18 +110,18 @@ internal class MediaStoreLibraryScanner(
                         id = "local:album:$key",
                         title = albumName,
                         artworkKey = "album-$key",
-                        year = 0,
+                        year = embeddedTags?.year ?: 0,
                         copyright = embeddedTags?.copyright.orEmpty(),
                         createdAt = isoDate(dateAdded),
                     ),
-                    albumArtists = artistsOf(artistName),
+                    albumArtists = artistsOf(albumArtistName),
                     composers = composersOf(text(ColumnComposer) ?: ""),
                     genres = genresByTrack[mediaId].orEmpty().mapNotNull { raw ->
                         raw.trim().takeIf(String::isNotEmpty)?.let { LocalGenre(genreId(it), it) }
                     },
                     durationMillis = number(ColumnDuration)?.coerceAtLeast(0L) ?: 0L,
                     discNumber = number(ColumnDiscNumber)?.toInt() ?: 0,
-                    trackNumber = number(ColumnTrackNumber)?.toInt() ?: 0,
+                    trackNumber = trackNumber,
                     createdAt = isoDate(dateAdded),
                     updatedAt = isoDate(dateModified),
                     addedAt = isoDate(dateAdded),
@@ -249,6 +255,7 @@ internal class MediaStoreLibraryScanner(
         const val ColumnTitle = MediaStore.Audio.Media.TITLE
         const val ColumnTitleKey = MediaStore.Audio.Media.TITLE_KEY
         const val ColumnArtist = MediaStore.Audio.Media.ARTIST
+        const val ColumnAlbumArtist = MediaStore.Audio.Media.ALBUM_ARTIST
         const val ColumnAlbum = MediaStore.Audio.Media.ALBUM
         const val ColumnAlbumKey = MediaStore.Audio.Media.ALBUM_KEY
         const val ColumnComposer = MediaStore.Audio.Media.COMPOSER
@@ -269,6 +276,7 @@ internal class MediaStoreLibraryScanner(
             ColumnTitle,
             ColumnTitleKey,
             ColumnArtist,
+            ColumnAlbumArtist,
             ColumnAlbum,
             ColumnAlbumKey,
             ColumnComposer,
@@ -284,7 +292,17 @@ internal class MediaStoreLibraryScanner(
             ColumnMimeType,
         )
 
-        const val Selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        /** Guards against very short clips (voice memos, notification sounds) that
+         *  IS_MUSIC alone doesn't reliably exclude on every OEM. Durations under 1s are
+         *  let through unfiltered: some .opus encoders leave DURATION unset/zero, and
+         *  that case is corrected by a MediaMetadataRetriever fallback during the scan
+         *  rather than excluded here. */
+        const val MinimumDurationMillis = 30_000L
+
+        const val Selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND (" +
+            "${MediaStore.Audio.Media.DURATION} IS NULL OR " +
+            "${MediaStore.Audio.Media.DURATION} < 1000 OR " +
+            "${MediaStore.Audio.Media.DURATION} >= $MinimumDurationMillis)"
         const val SortOrder = "${MediaStore.Audio.Media.ALBUM} COLLATE NOCASE, ${MediaStore.Audio.Media.DISC_NUMBER}, ${MediaStore.Audio.Media.TRACK}, ${MediaStore.Audio.Media.TITLE} COLLATE NOCASE"
         val EmbeddedThumbnailRequestSize = Size(1, 1)
         val ArtworkTargetSize = Size(1024, 1024)
