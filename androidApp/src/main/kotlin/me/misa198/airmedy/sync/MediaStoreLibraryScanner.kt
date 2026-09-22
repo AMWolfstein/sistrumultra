@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -40,6 +41,36 @@ internal data class LocalLibraryScanResult(
     val artwork: List<LocalScanArtwork>,
 )
 
+/** A previously scanned track's identity/metadata, read back before a rescan so
+ *  unchanged files can skip re-parsing their embedded tags. */
+internal data class PriorTrackScanState(
+    val identityHash: String,
+    val schemaVersion: Int,
+    val year: Int,
+    val releaseDate: String,
+    val bpm: Int,
+    val label: String,
+    val isrc: String,
+    val copyright: String,
+)
+
+/** A previously copied album artwork file, read back so unchanged albums skip
+ *  re-decoding/re-encoding their artwork. */
+internal data class PriorArtworkScanState(
+    val sha256: String,
+    val size: Long,
+    val relativePath: String,
+)
+
+internal data class PriorLibraryScanState(
+    val tracksByTrackId: Map<String, PriorTrackScanState> = emptyMap(),
+    val artworkByAlbumKey: Map<String, PriorArtworkScanState> = emptyMap(),
+)
+
+/** Representative track chosen to source an album's artwork, plus whether that
+ *  specific track was found unchanged since the prior scan. */
+private data class AlbumArtworkCandidate(val mediaUri: Uri, val absolutePath: String, val unchanged: Boolean)
+
 /**
  * Reads the device MediaStore audio collection and synthesizes the platform-neutral
  * [LocalLibrarySnapshot] plus the audio/artwork rows [AndroidLibrarySyncStore] persists.
@@ -52,11 +83,14 @@ internal class MediaStoreLibraryScanner(
     private val contentResolver: ContentResolver,
     private val artworkDir: File,
 ) {
-    fun scan(): LocalLibraryScanResult {
+    fun scan(
+        prior: PriorLibraryScanState = PriorLibraryScanState(),
+        filter: MediaScanFilter = MediaScanFilter(),
+    ): LocalLibraryScanResult {
         val genresByTrack = genresByTrackId()
         val audio = linkedMapOf<String, LocalScanAudio>()
         val tracks = mutableListOf<LocalTrack>()
-        val albumRepresentatives = linkedMapOf<String, Pair<Uri, String>>()
+        val albumRepresentatives = linkedMapOf<String, AlbumArtworkCandidate>()
 
         contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -72,6 +106,7 @@ internal class MediaStoreLibraryScanner(
             while (cursor.moveToNext()) {
                 val mediaId = number(ColumnId) ?: continue
                 val data = text(ColumnData) ?: continue
+                if (!filter.allows(data)) continue
                 val title = text(ColumnTitle) ?: ""
                 if (title.isBlank()) continue
                 val trackId = "local:$mediaId"
@@ -83,7 +118,24 @@ internal class MediaStoreLibraryScanner(
                 val dateModified = number(ColumnDateModified) ?: 0L
                 val size = number(ColumnSize) ?: 0L
                 val mime = text(ColumnMimeType) ?: ""
-                val embeddedTags = EmbeddedTagReader.embeddedTrackTags(data)
+
+                val newIdentityHash = identityHash("$data|$size|$dateModified")
+                val priorTrack = prior.tracksByTrackId[trackId]
+                // Skip re-parsing embedded tags (the expensive file-read work) when the
+                // file itself hasn't changed and it was already parsed at the current
+                // schema version; otherwise a bumped schema forces one full re-parse so
+                // newly added fields get backfilled without a manual rescan.
+                val unchanged = priorTrack != null &&
+                    priorTrack.identityHash == newIdentityHash &&
+                    priorTrack.schemaVersion >= CurrentMetadataSchemaVersion
+                val embeddedTags = if (unchanged) null else EmbeddedTagReader.embeddedTrackTags(data)
+                val year = if (unchanged) priorTrack.year else embeddedTags?.year ?: 0
+                val releaseDate = if (unchanged) priorTrack.releaseDate else embeddedTags?.releaseDate.orEmpty()
+                val bpm = if (unchanged) priorTrack.bpm else embeddedTags?.bpm ?: 0
+                val label = if (unchanged) priorTrack.label else embeddedTags?.label.orEmpty()
+                val isrc = if (unchanged) priorTrack.isrc else embeddedTags?.isrc.orEmpty()
+                val copyright = if (unchanged) priorTrack.copyright else embeddedTags?.copyright.orEmpty()
+
                 // Some OEMs report MediaStore.Audio.Media.TRACK as discNumber * 1000 +
                 // trackNumber instead of the plain track number (e.g. 1001..1009 for a
                 // single-disc, 12-track album).
@@ -93,13 +145,17 @@ internal class MediaStoreLibraryScanner(
                     audio[trackId] = LocalScanAudio(
                         trackId = trackId,
                         absolutePath = data,
-                        sha256 = identityHash("$data|$size|$dateModified"),
+                        sha256 = newIdentityHash,
                         size = size,
                     )
                 }
                 albumRepresentatives.putIfAbsent(
                     key,
-                    ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId) to data,
+                    AlbumArtworkCandidate(
+                        mediaUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId),
+                        absolutePath = data,
+                        unchanged = unchanged,
+                    ),
                 )
                 tracks += LocalTrack(
                     id = trackId,
@@ -110,8 +166,8 @@ internal class MediaStoreLibraryScanner(
                         id = "local:album:$key",
                         title = albumName,
                         artworkKey = "album-$key",
-                        year = embeddedTags?.year ?: 0,
-                        copyright = embeddedTags?.copyright.orEmpty(),
+                        year = year,
+                        copyright = copyright,
                         createdAt = isoDate(dateAdded),
                     ),
                     albumArtists = artistsOf(albumArtistName),
@@ -119,7 +175,7 @@ internal class MediaStoreLibraryScanner(
                     genres = genresByTrack[mediaId].orEmpty().mapNotNull { raw ->
                         raw.trim().takeIf(String::isNotEmpty)?.let { LocalGenre(genreId(it), it) }
                     },
-                    durationMillis = number(ColumnDuration)?.coerceAtLeast(0L) ?: 0L,
+                    durationMillis = durationMillisOf(number(ColumnDuration), data),
                     discNumber = number(ColumnDiscNumber)?.toInt() ?: 0,
                     trackNumber = trackNumber,
                     createdAt = isoDate(dateAdded),
@@ -133,15 +189,18 @@ internal class MediaStoreLibraryScanner(
                     bitDepth = number(ColumnBitsPerSample)?.toInt() ?: 0,
                     codec = mime.substringAfter("audio/", mime),
                     fileSize = size,
-                    releaseDate = embeddedTags?.releaseDate.orEmpty(),
-                    bpm = embeddedTags?.bpm ?: 0,
-                    label = embeddedTags?.label.orEmpty(),
-                    isrc = embeddedTags?.isrc.orEmpty(),
+                    releaseDate = releaseDate,
+                    bpm = bpm,
+                    label = label,
+                    isrc = isrc,
+                    schemaVersion = CurrentMetadataSchemaVersion,
                 )
             }
         }
 
-        val artwork = albumRepresentatives.mapNotNull { (key, candidate) -> copyArtwork(key, candidate.first, candidate.second) }
+        val artwork = albumRepresentatives.mapNotNull { (key, candidate) ->
+            copyArtworkOrReuse(key, candidate, prior.artworkByAlbumKey[key])
+        }
         val sorted = tracks.sortedWith(
             compareBy<LocalTrack> { it.album.title.lowercase() }
                 .thenBy { it.discNumber }
@@ -153,6 +212,20 @@ internal class MediaStoreLibraryScanner(
             audio = audio,
             artwork = artwork,
         )
+    }
+
+    /** Some .opus encoders never finalize the Ogg granule/seek position, so MediaStore
+     *  reports 0 (or an implausible sub-1s value) for DURATION; fall back to decoding
+     *  the file's own duration in that case. */
+    private fun durationMillisOf(mediaStoreDurationMillis: Long?, path: String): Long {
+        val reported = mediaStoreDurationMillis?.coerceAtLeast(0L) ?: 0L
+        if (reported >= MinimumPlausibleDurationMillis) return reported
+        return runCatching {
+            MediaMetadataRetriever().use { retriever ->
+                retriever.setDataSource(path)
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            }
+        }.getOrNull()?.takeIf { it > 0 } ?: reported
     }
 
     private fun artistsOf(raw: String): List<LocalArtistRef> = raw
@@ -198,6 +271,18 @@ internal class MediaStoreLibraryScanner(
             }
         }
         return members
+    }
+
+    /** Reuses the previously copied artwork file when the representative track hasn't
+     *  changed and that file still exists, instead of re-decoding/re-encoding it. */
+    private fun copyArtworkOrReuse(albumKey: String, candidate: AlbumArtworkCandidate, reuse: PriorArtworkScanState?): LocalScanArtwork? {
+        if (candidate.unchanged && reuse != null) {
+            val file = File(artworkDir, "$albumKey.jpg")
+            if (file.isFile && file.length() == reuse.size) {
+                return LocalScanArtwork(artworkKey = albumKey, relativePath = reuse.relativePath, sha256 = reuse.sha256, size = reuse.size)
+            }
+        }
+        return copyArtwork(albumKey, candidate.mediaUri, candidate.absolutePath)
     }
 
     private fun copyArtwork(albumKey: String, mediaUri: Uri, absolutePath: String): LocalScanArtwork? {
@@ -250,6 +335,12 @@ internal class MediaStoreLibraryScanner(
     }
 
     companion object {
+        /** Bump whenever EmbeddedTagReader extraction gains/changes fields (e.g. the
+         *  release date/BPM/label/ISRC/copyright extraction added alongside this
+         *  constant) so the incremental-scan check forces one full re-parse per track
+         *  to backfill them, instead of skipping unchanged files forever. */
+        const val CurrentMetadataSchemaVersion = 2
+
         const val ColumnId = MediaStore.Audio.Media._ID
         const val ColumnData = MediaStore.Audio.Media.DATA
         const val ColumnTitle = MediaStore.Audio.Media.TITLE
@@ -299,9 +390,13 @@ internal class MediaStoreLibraryScanner(
          *  rather than excluded here. */
         const val MinimumDurationMillis = 30_000L
 
+        /** Below this, MediaStore's DURATION is treated as unreliable (e.g. an
+         *  un-finalized .opus seek table) and re-read via MediaMetadataRetriever. */
+        const val MinimumPlausibleDurationMillis = 1_000L
+
         const val Selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND (" +
             "${MediaStore.Audio.Media.DURATION} IS NULL OR " +
-            "${MediaStore.Audio.Media.DURATION} < 1000 OR " +
+            "${MediaStore.Audio.Media.DURATION} < $MinimumPlausibleDurationMillis OR " +
             "${MediaStore.Audio.Media.DURATION} >= $MinimumDurationMillis)"
         const val SortOrder = "${MediaStore.Audio.Media.ALBUM} COLLATE NOCASE, ${MediaStore.Audio.Media.DISC_NUMBER}, ${MediaStore.Audio.Media.TRACK}, ${MediaStore.Audio.Media.TITLE} COLLATE NOCASE"
         val EmbeddedThumbnailRequestSize = Size(1, 1)

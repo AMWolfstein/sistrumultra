@@ -73,6 +73,7 @@ data class LocalTrack(
     val bpm: Int = 0,
     val label: String = "",
     val isrc: String = "",
+    val schemaVersion: Int = 0,
 )
 
 data class LocalLibrarySnapshot(
@@ -108,6 +109,7 @@ object LocalLibraryJson {
         if (track.label.isNotBlank()) put("label", track.label)
         if (track.isrc.isNotBlank()) put("isrc", track.isrc)
         if (track.album.copyright.isNotBlank()) put("copyright", track.album.copyright)
+        if (track.schemaVersion > 0) put("schema_version", track.schemaVersion)
         put("artists", buildJsonArray {
             track.artists.forEachValid { add(it.toJson()) }
         })

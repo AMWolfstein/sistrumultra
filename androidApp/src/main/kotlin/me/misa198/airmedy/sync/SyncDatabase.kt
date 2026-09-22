@@ -210,6 +210,20 @@ internal data class ArtworkAssetRow(
     val relativePath: String,
 )
 
+/** A currently active track's identity hash + rawJson, read back before a rescan. */
+internal data class PriorTrackScanRow(
+    val trackId: String,
+    val rawJson: String,
+    val sha256: String?,
+)
+
+internal data class ArtworkAssetStateRow(
+    val assetId: String,
+    val sha256: String,
+    val size: Long,
+    val relativePath: String,
+)
+
 @Dao
 internal interface SyncDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertPlan(value: SyncPlanEntity)
@@ -344,6 +358,23 @@ internal interface SyncDao {
     fun observeTracks(): Flow<List<LibraryTrackRow>>
 
     @Query("SELECT trackId, playCount FROM sync_tracks") suspend fun trackPlayCounts(): List<TrackPlayCountRow>
+
+    @Query("""
+        SELECT t.trackId AS trackId, t.rawJson AS rawJson, audio.sha256 AS sha256
+        FROM sync_tracks t
+        INNER JOIN sync_plans p ON p.planId = t.planId
+        LEFT JOIN sync_assets audio ON audio.planId = t.planId AND audio.assetId = ('audio:' || t.trackId)
+        WHERE p.active = 1
+    """)
+    suspend fun activeTrackScanState(): List<PriorTrackScanRow>
+
+    @Query("""
+        SELECT a.assetId AS assetId, a.sha256 AS sha256, a.size AS size, a.relativePath AS relativePath
+        FROM sync_assets a
+        INNER JOIN sync_plans p ON p.planId = a.planId
+        WHERE p.active = 1 AND a.relativePath IS NOT NULL AND a.assetId LIKE 'artwork:%'
+    """)
+    suspend fun activeArtworkScanState(): List<ArtworkAssetStateRow>
 
     @Query("SELECT entityType, entityId FROM library_search_fts WHERE library_search_fts MATCH :match AND planId IN (SELECT planId FROM sync_plans WHERE active = 1)")
     fun observeSearchCandidates(match: String): Flow<List<LibrarySearchCandidate>>
@@ -884,6 +915,34 @@ internal class AndroidLibrarySyncStore(
      * created playlists and pending favorite mutations survive a rescan because track
      * ids are MediaStore-stable. Only artwork files owned by this app are deleted.
      */
+    /** The active plan's per-track identity hashes/metadata and per-album artwork
+     *  files, read back before a rescan so unchanged files can skip re-parsing. */
+    suspend fun priorScanState(): PriorLibraryScanState {
+        val tracksByTrackId = dao.activeTrackScanState().mapNotNull { row ->
+            val sha256 = row.sha256 ?: return@mapNotNull null
+            val json = runCatching { LibrarySyncProtocol.json.parseToJsonElement(row.rawJson) as? JsonObject }.getOrNull()
+                ?: return@mapNotNull null
+            row.trackId to PriorTrackScanState(
+                identityHash = sha256,
+                schemaVersion = json.int("schema_version"),
+                year = json.int("year"),
+                releaseDate = json.string("release_date").orEmpty(),
+                bpm = json.int("bpm"),
+                label = json.string("label").orEmpty(),
+                isrc = json.string("isrc").orEmpty(),
+                copyright = json.string("copyright").orEmpty(),
+            )
+        }.toMap()
+        val artworkByAlbumKey = dao.activeArtworkScanState().associate { row ->
+            row.assetId.removePrefix("artwork:") to PriorArtworkScanState(
+                sha256 = row.sha256,
+                size = row.size,
+                relativePath = row.relativePath,
+            )
+        }
+        return PriorLibraryScanState(tracksByTrackId, artworkByAlbumKey)
+    }
+
     suspend fun writeLocalLibrary(
         snapshot: LocalLibrarySnapshot,
         audioRows: Map<String, LocalScanAudio>,

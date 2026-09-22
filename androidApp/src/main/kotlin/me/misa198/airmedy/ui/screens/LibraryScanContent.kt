@@ -32,6 +32,7 @@ import me.misa198.airmedy.R
 import me.misa198.airmedy.sync.AndroidSyncRuntime
 import me.misa198.airmedy.sync.LocalLibraryScanResult
 import me.misa198.airmedy.sync.MediaStoreLibraryScanner
+import me.misa198.airmedy.sync.ScanFilterPreferences
 import me.misa198.airmedy.ui.components.AirmedyPillButton
 import me.misa198.airmedy.ui.components.AirmedyPillButtonVariant
 import me.misa198.airmedy.ui.theme.LocalAirmedyColors
@@ -151,8 +152,10 @@ private suspend fun performScan(context: Context): LibraryScanUiState? = withCon
             contentResolver = context.contentResolver,
             artworkDir = File(context.filesDir, "artwork"),
         )
-        val result: LocalLibraryScanResult = scanner.scan()
-        AndroidSyncRuntime.syncStore().writeLocalLibrary(
+        val syncStore = AndroidSyncRuntime.syncStore()
+        val filter = ScanFilterPreferences(context).currentFilter()
+        val result: LocalLibraryScanResult = scanner.scan(prior = syncStore.priorScanState(), filter = filter)
+        syncStore.writeLocalLibrary(
             snapshot = result.snapshot,
             audioRows = result.audio,
             artworkRows = result.artwork,
