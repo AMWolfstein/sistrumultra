@@ -108,6 +108,7 @@ object MaterialSymbols {
     const val StylusFountainPen = "stylus_fountain_pen"
     const val Edit = "edit"
     const val Delete = "delete"
+    const val Folder = "folder"
 }
 
 @Composable

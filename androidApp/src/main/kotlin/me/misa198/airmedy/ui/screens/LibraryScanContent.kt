@@ -33,6 +33,9 @@ import me.misa198.airmedy.sync.AndroidSyncRuntime
 import me.misa198.airmedy.sync.LocalLibraryScanResult
 import me.misa198.airmedy.sync.MediaStoreLibraryScanner
 import me.misa198.airmedy.sync.ScanFilterPreferences
+import me.misa198.airmedy.ui.components.ActionList
+import me.misa198.airmedy.ui.components.ActionListContainerStyle
+import me.misa198.airmedy.ui.components.ActionListItem
 import me.misa198.airmedy.ui.components.AirmedyPillButton
 import me.misa198.airmedy.ui.components.AirmedyPillButtonVariant
 import me.misa198.airmedy.ui.theme.LocalAirmedyColors
@@ -49,6 +52,7 @@ internal data class LibraryScanUiState(
 @Composable
 internal fun LibraryScanContent(
     modifier: Modifier = Modifier,
+    onScanFilterSelected: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var uiState by remember { mutableStateOf(LibraryScanUiState()) }
@@ -76,6 +80,13 @@ internal fun LibraryScanContent(
         Text(
             text = stringResource(R.string.scan_description),
             color = colors.textMuted,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        ActionList(
+            items = listOf(
+                ActionListItem(R.string.scan_filter_title, onClick = onScanFilterSelected),
+            ),
+            containerStyle = ActionListContainerStyle.Card,
         )
         Spacer(modifier = Modifier.height(16.dp))
         when {
