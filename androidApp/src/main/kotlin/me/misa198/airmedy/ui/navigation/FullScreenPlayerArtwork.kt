@@ -28,14 +28,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.misa198.airmedy.player.ArtworkCrossfadeTransition
+import me.misa198.airmedy.sync.decodeArtworkBitmaps
 import me.misa198.airmedy.ui.components.MaterialSymbol
 import me.misa198.airmedy.ui.components.MaterialSymbols
-import me.misa198.airmedy.ui.components.decodeArtworkBitmaps
 import me.misa198.airmedy.ui.theme.LocalAirmedyColors
-import java.io.File
 
 private val FullScreenArtworkShape = RoundedCornerShape(16.dp)
 

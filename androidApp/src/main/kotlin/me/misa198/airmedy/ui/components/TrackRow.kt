@@ -1,7 +1,6 @@
 package me.misa198.airmedy.ui.components
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -42,7 +41,7 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.misa198.airmedy.R
-import me.misa198.airmedy.sync.EmbeddedTagReader
+import me.misa198.airmedy.sync.decodeArtworkBitmaps
 import me.misa198.airmedy.ui.theme.LocalAirmedyColors
 
 private val artworkCache = LruCache<String, ImageBitmap>(250)
@@ -87,46 +86,6 @@ internal fun rememberArtworkThumbnail(
     }
     return bitmap
 }
-
-/** Decodes the persisted artwork file, falling back to the audio file's embedded picture. */
-internal fun decodeArtworkBitmaps(
-    absolutePath: String?,
-    audioPath: String?,
-    targetPx: Int,
-    config: Bitmap.Config,
-): Bitmap? {
-    absolutePath?.takeIf { File(it).isFile }?.let { path ->
-        decodeBitmapFile(path, targetPx, config)?.let { return it }
-    }
-    audioPath?.takeIf { File(it).isFile }?.let { audio ->
-        EmbeddedTagReader.embeddedArtworkBytes(audio)?.let { bytes ->
-            decodeBitmapBytes(bytes, targetPx, config)?.let { return it }
-        }
-    }
-    return null
-}
-
-private fun decodeBitmapFile(path: String, targetPx: Int, config: Bitmap.Config): Bitmap? = runCatching {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    BitmapFactory.decodeFile(path, bitmapOptionsFor(bounds.outWidth, bounds.outHeight, targetPx, config))
-}.getOrNull()
-
-private fun decodeBitmapBytes(bytes: ByteArray, targetPx: Int, config: Bitmap.Config): Bitmap? = runCatching {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bitmapOptionsFor(bounds.outWidth, bounds.outHeight, targetPx, config))
-}.getOrNull()
-
-private fun bitmapOptionsFor(width: Int, height: Int, targetPx: Int, config: Bitmap.Config) =
-    BitmapFactory.Options().apply {
-        var sampleSize = 1
-        while (width / (sampleSize * 2) >= targetPx && height / (sampleSize * 2) >= targetPx) {
-            sampleSize *= 2
-        }
-        inSampleSize = sampleSize
-        inPreferredConfig = config
-    }
 
 @Composable
 fun TrackRow(

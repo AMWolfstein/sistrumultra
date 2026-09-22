@@ -30,6 +30,20 @@ internal data class LocalScanAudio(
     val size: Long,
 )
 
+/**
+ * The one place an album's artwork key is derived. Every track of the album
+ * ([LocalTrack.artworkKey] and its album ref) and the album's [LocalScanArtwork]
+ * row must carry this same value: `writeLocalLibrary` keeps a track's key only
+ * when an artwork row has it, and the track query joins on it.
+ */
+internal fun albumArtworkKey(albumKey: String): String = "album-$albumKey"
+
+/** `sync_assets` id of an artwork row; the track query joins on this same `'artwork:' || artworkKey` form. */
+internal fun artworkAssetId(artworkKey: String): String = "artwork:$artworkKey"
+
+/** Inverse of [artworkAssetId]. */
+internal fun artworkKeyOfAssetId(assetId: String): String = assetId.removePrefix("artwork:")
+
 /** Copied album artwork, persisted under the library store's artwork directory. */
 internal data class LocalScanArtwork(
     val artworkKey: String,
@@ -67,7 +81,8 @@ internal data class PriorArtworkScanState(
 
 internal data class PriorLibraryScanState(
     val tracksByTrackId: Map<String, PriorTrackScanState> = emptyMap(),
-    val artworkByAlbumKey: Map<String, PriorArtworkScanState> = emptyMap(),
+    /** Keyed by [albumArtworkKey]. */
+    val artworkByArtworkKey: Map<String, PriorArtworkScanState> = emptyMap(),
 )
 
 /** Representative track chosen to source an album's artwork, plus whether that
@@ -117,6 +132,7 @@ internal class MediaStoreLibraryScanner(
                 val albumArtistName = text(ColumnAlbumArtist)?.takeIf(String::isNotBlank) ?: artistName
                 val albumName = text(ColumnAlbum) ?: ""
                 val key = albumKey(text(ColumnAlbumKey), artistName, albumName)
+                val artworkKey = albumArtworkKey(key)
                 val dateAdded = number(ColumnDateAdded) ?: 0L
                 val dateModified = number(ColumnDateModified) ?: 0L
                 val size = number(ColumnSize) ?: 0L
@@ -169,7 +185,7 @@ internal class MediaStoreLibraryScanner(
                     album = LocalAlbumRef(
                         id = "local:album:$key",
                         title = albumName,
-                        artworkKey = "album-$key",
+                        artworkKey = artworkKey,
                         year = year,
                         copyright = copyright,
                         createdAt = isoDate(dateAdded),
@@ -185,7 +201,7 @@ internal class MediaStoreLibraryScanner(
                     createdAt = isoDate(dateAdded),
                     updatedAt = isoDate(dateModified),
                     addedAt = isoDate(dateAdded),
-                    artworkKey = "album-$key",
+                    artworkKey = artworkKey,
                     archived = false,
                     format = format,
                     bitrate = number(ColumnBitrate)?.toInt() ?: 0,
@@ -203,7 +219,7 @@ internal class MediaStoreLibraryScanner(
         }
 
         val artwork = albumRepresentatives.mapNotNull { (key, candidate) ->
-            copyArtworkOrReuse(key, candidate, prior.artworkByAlbumKey[key])
+            copyArtworkOrReuse(key, candidate, prior.artworkByArtworkKey[albumArtworkKey(key)])
         }
         val sorted = tracks.sortedWith(
             compareBy<LocalTrack> { it.album.title.lowercase() }
@@ -314,7 +330,7 @@ internal class MediaStoreLibraryScanner(
         if (candidate.unchanged && reuse != null) {
             val file = File(artworkDir, "$albumKey.jpg")
             if (file.isFile && file.length() == reuse.size) {
-                return LocalScanArtwork(artworkKey = albumKey, relativePath = reuse.relativePath, sha256 = reuse.sha256, size = reuse.size)
+                return LocalScanArtwork(artworkKey = albumArtworkKey(albumKey), relativePath = reuse.relativePath, sha256 = reuse.sha256, size = reuse.size)
             }
         }
         return copyArtwork(albumKey, candidate.mediaUri, candidate.absolutePath)
@@ -334,7 +350,7 @@ internal class MediaStoreLibraryScanner(
         bitmap.recycle()
         if (!wrote || !file.isFile || file.length() <= 0L) return null
         return LocalScanArtwork(
-            artworkKey = albumKey,
+            artworkKey = albumArtworkKey(albumKey),
             relativePath = "artwork/${file.name}",
             sha256 = fileSha256(file),
             size = file.length(),

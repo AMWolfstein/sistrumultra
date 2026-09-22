@@ -4,7 +4,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Notification
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -46,6 +45,7 @@ import kotlinx.coroutines.sync.withLock
 import me.misa198.airmedy.MainActivity
 import me.misa198.airmedy.R
 import me.misa198.airmedy.sync.AndroidSyncRuntime
+import me.misa198.airmedy.sync.decodeArtworkBitmaps
 import me.misa198.airmedy.lastfm.AndroidLastFmRuntime
 import me.misa198.airmedy.lastfm.LastFmService
 import me.misa198.airmedy.lastfm.LastFmTrack
@@ -842,7 +842,7 @@ class PlaybackService : Service() {
                 .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, item.artist)
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs)
-        loadNowPlayingArtwork(item.artworkPath)?.let { artwork ->
+        loadNowPlayingArtwork(item)?.let { artwork ->
             metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, artwork)
             metadata.putBitmap(MediaMetadata.METADATA_KEY_ART, artwork)
             metadata.putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, artwork)
@@ -913,23 +913,13 @@ class PlaybackService : Service() {
             .setState(state, positionMs, if (state == AndroidMediaPlaybackState.STATE_PLAYING) 1f else 0f)
             .build()
 
-    private fun loadNowPlayingArtwork(path: String?): Bitmap? {
-        if (path.isNullOrBlank()) return null
-        nowPlayingArtworkCache.get(path)?.let { return it }
-        val artwork = runCatching {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(path, bounds)
-            var sampleSize = 1
-            while (bounds.outWidth / (sampleSize * 2) >= NowPlayingArtworkSizePx &&
-                bounds.outHeight / (sampleSize * 2) >= NowPlayingArtworkSizePx
-            ) sampleSize *= 2
-            BitmapFactory.decodeFile(path, BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            })
-        }.getOrNull()
-        if (artwork != null) nowPlayingArtworkCache.put(path, artwork)
-        else Log.w(PlaybackLogTag, "Unable to decode Now Playing artwork path=$path")
+    /** Same resolution as the in-app UI ([decodeArtworkBitmaps]): album artwork file, then embedded picture. */
+    private fun loadNowPlayingArtwork(item: PlaybackItem): Bitmap? {
+        val cacheKey = item.artworkPath ?: item.audioPath
+        nowPlayingArtworkCache.get(cacheKey)?.let { return it }
+        val artwork = decodeArtworkBitmaps(item.artworkPath, item.audioPath, NowPlayingArtworkSizePx, Bitmap.Config.ARGB_8888)
+        if (artwork != null) nowPlayingArtworkCache.put(cacheKey, artwork)
+        else Log.w(PlaybackLogTag, "Unable to decode Now Playing artwork artworkPath=${item.artworkPath} audioPath=${item.audioPath}")
         return artwork
     }
 

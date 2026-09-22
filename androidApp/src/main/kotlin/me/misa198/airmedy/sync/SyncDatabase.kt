@@ -946,14 +946,14 @@ internal class AndroidLibrarySyncStore(
                 copyright = json.string("copyright").orEmpty(),
             )
         }.toMap()
-        val artworkByAlbumKey = dao.activeArtworkScanState().associate { row ->
-            row.assetId.removePrefix("artwork:") to PriorArtworkScanState(
+        val artworkByArtworkKey = dao.activeArtworkScanState().associate { row ->
+            artworkKeyOfAssetId(row.assetId) to PriorArtworkScanState(
                 sha256 = row.sha256,
                 size = row.size,
                 relativePath = row.relativePath,
             )
         }
-        return PriorLibraryScanState(tracksByTrackId, artworkByAlbumKey)
+        return PriorLibraryScanState(tracksByTrackId, artworkByArtworkKey)
     }
 
     suspend fun writeLocalLibrary(
@@ -971,7 +971,7 @@ internal class AndroidLibrarySyncStore(
                     add(SyncAssetEntity(planId, "audio:$trackId", "audio", row.sha256, row.size, row.absolutePath))
                 }
                 artworkRows.forEach { row ->
-                    add(SyncAssetEntity(planId, "artwork:${row.artworkKey}", "artwork", row.sha256, row.size, row.relativePath))
+                    add(SyncAssetEntity(planId, artworkAssetId(row.artworkKey), "artwork", row.sha256, row.size, row.relativePath))
                 }
             })
             val trackEntities = snapshot.tracks.mapIndexed { index, track ->
