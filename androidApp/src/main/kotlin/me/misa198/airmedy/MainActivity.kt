@@ -371,6 +371,7 @@ class MainActivity : ComponentActivity() {
                     onLrclibChanged = { enabled -> preferenceScope.launch { lyricsPreferences.setLrclib(enabled) } },
                     onKugouChanged = { enabled -> preferenceScope.launch { lyricsPreferences.setKugou(enabled) } },
                     onEmbeddedChanged = { enabled -> preferenceScope.launch { lyricsPreferences.setEmbedded(enabled) } },
+                    onSidecarChanged = { enabled -> preferenceScope.launch { lyricsPreferences.setSidecar(enabled) } },
                     crossfadeSeconds = crossfadeSettings.seconds,
                     lastEnabledCrossfadeSeconds = crossfadeSettings.lastEnabledSeconds,
                     onCrossfadeSecondsChanged = playbackController::setCrossfadeSeconds,

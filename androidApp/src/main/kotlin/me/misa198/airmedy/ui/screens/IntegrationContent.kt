@@ -116,12 +116,14 @@ internal fun LyricsContent(
     onLrclibChanged: (Boolean) -> Unit,
     onKugouChanged: (Boolean) -> Unit,
     onEmbeddedChanged: (Boolean) -> Unit = {},
+    onSidecarChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LabeledCard(label = stringResource(R.string.lyrics_data_sources), modifier = modifier) {
         ActionList(
             items = listOf(
                 ActionListItem(R.string.lyrics_embedded, trailingContent = { Switch(checked = settings.embedded, onCheckedChange = onEmbeddedChanged) }, onClick = { onEmbeddedChanged(!settings.embedded) }),
+                ActionListItem(R.string.lyrics_sidecar, trailingContent = { Switch(checked = settings.sidecar, onCheckedChange = onSidecarChanged) }, onClick = { onSidecarChanged(!settings.sidecar) }),
                 ActionListItem(R.string.lyrics_lrclib, trailingContent = { Switch(checked = settings.lrclib, onCheckedChange = onLrclibChanged) }, onClick = { onLrclibChanged(!settings.lrclib) }),
                 ActionListItem(R.string.lyrics_kugou, trailingContent = { Switch(checked = settings.kugou, onCheckedChange = onKugouChanged) }, onClick = { onKugouChanged(!settings.kugou) }),
             ),
