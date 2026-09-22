@@ -187,6 +187,8 @@ class EmbeddedTagReaderTest {
         assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
     }
 
+    // Before the itunesLyrics() fixture gained its mean/name version/flags header this passed
+    // only because the freeform atom was unreadable, not because the precedence rule ran.
     @Test fun `m4a prefers copyright lyric over itunes freeform`() {
         val file = m4a(ilst = lyricAtom("plain lyrics") + itunesLyrics(lrc))
         assertEquals("plain lyrics", EmbeddedTagReader.embeddedLyricsText(file.path))
@@ -523,9 +525,11 @@ class EmbeddedTagReaderTest {
         return box("\u00A9lyr", box("data", dataPayload.toByteArray()))
     }
 
+    /** `mean`/`name` carry a 4-byte version/flags header before the text, as written by
+     *  real taggers (verified against mutagen's `----:com.apple.iTunes:LYRICS` output). */
     private fun itunesLyrics(text: String): ByteArray {
-        val mean = box("mean", "com.apple.iTunes".toByteArray(Charsets.UTF_8))
-        val name = box("name", "LYRICS".toByteArray(Charsets.UTF_8))
+        val mean = box("mean", ByteArray(4) + "com.apple.iTunes".toByteArray(Charsets.UTF_8))
+        val name = box("name", ByteArray(4) + "LYRICS".toByteArray(Charsets.UTF_8))
         val dataPayload = ByteArrayOutputStream()
         dataPayload.write(ByteArray(8))
         dataPayload.write(text.toByteArray(Charsets.UTF_8))
