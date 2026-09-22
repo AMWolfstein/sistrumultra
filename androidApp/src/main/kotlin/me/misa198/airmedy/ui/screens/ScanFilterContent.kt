@@ -10,11 +10,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -96,8 +93,12 @@ internal fun ScanFilterContent(modifier: Modifier = Modifier) {
             .sorted()
     }
 
+    // `modifier` (settingsPageModifier from AppDestinationContent) already carries
+    // fillMaxSize().verticalScroll(...) for the whole settings page; adding another
+    // verticalScroll() here nested a scrollable Column inside an already-scrollable
+    // one, which Compose measures with an infinite height constraint and crashes on.
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        modifier = modifier.padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Text(text = stringResource(R.string.scan_filter_description), color = colors.textMuted)
