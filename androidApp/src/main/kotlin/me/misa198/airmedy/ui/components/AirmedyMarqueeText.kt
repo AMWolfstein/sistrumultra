@@ -47,46 +47,59 @@ fun AirmedyMarqueeText(
             ).size.width
         }
         val travelDistancePx = (textWidthPx - availableWidthPx).coerceAtLeast(0)
-        val targetOffset = if (travelDistancePx > 0) -travelDistancePx.toFloat() else 0f
-        val totalDurationMs = if (travelDistancePx > 0) {
-            ((travelDistancePx / 20f + 4f) * 1000f).roundToInt().coerceAtLeast(4_000)
+        if (travelDistancePx == 0) {
+            // Text fits: stay static. An infinite transition here would still tick every
+            // frame (animating 0 -> 0) and keep the app redrawing at 60 fps while idle.
+            MarqueeTextLine(text, color, style, translationX = { 0f })
         } else {
-            4_000
+            ScrollingMarqueeTextLine(text, color, style, travelDistancePx)
         }
-        val pauseStartMs = (totalDurationMs * 0.15f).roundToInt()
-        val moveEndMs = (totalDurationMs * 0.45f).roundToInt()
-        val pauseEndMs = (totalDurationMs * 0.55f).roundToInt()
-        val moveBackMs = (totalDurationMs * 0.85f).roundToInt()
-
-        val transition = rememberInfiniteTransition(label = "airmedy-marquee")
-        val translationX by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = targetOffset,
-            animationSpec = infiniteRepeatable(
-                animation = keyframes {
-                    durationMillis = totalDurationMs
-                    0f at 0 using FastOutSlowInEasing
-                    0f at pauseStartMs using FastOutSlowInEasing
-                    targetOffset at moveEndMs using FastOutSlowInEasing
-                    targetOffset at pauseEndMs using FastOutSlowInEasing
-                    0f at moveBackMs using FastOutSlowInEasing
-                    0f at totalDurationMs
-                },
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "airmedy-marquee-translation",
-        )
-
-        Text(
-            text = text,
-            modifier = Modifier
-                .wrapContentWidth(align = Alignment.Start, unbounded = true)
-                .graphicsLayer { this.translationX = translationX },
-            color = color,
-            style = style,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-        )
     }
+}
+
+/** Only composed when the text overflows ([travelDistancePx] > 0). */
+@Composable
+private fun ScrollingMarqueeTextLine(text: String, color: Color, style: TextStyle, travelDistancePx: Int) {
+    val targetOffset = -travelDistancePx.toFloat()
+    val totalDurationMs = ((travelDistancePx / 20f + 4f) * 1000f).roundToInt().coerceAtLeast(4_000)
+    val pauseStartMs = (totalDurationMs * 0.15f).roundToInt()
+    val moveEndMs = (totalDurationMs * 0.45f).roundToInt()
+    val pauseEndMs = (totalDurationMs * 0.55f).roundToInt()
+    val moveBackMs = (totalDurationMs * 0.85f).roundToInt()
+
+    val transition = rememberInfiniteTransition(label = "airmedy-marquee")
+    val translationX by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = targetOffset,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = totalDurationMs
+                0f at 0 using FastOutSlowInEasing
+                0f at pauseStartMs using FastOutSlowInEasing
+                targetOffset at moveEndMs using FastOutSlowInEasing
+                targetOffset at pauseEndMs using FastOutSlowInEasing
+                0f at moveBackMs using FastOutSlowInEasing
+                0f at totalDurationMs
+            },
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "airmedy-marquee-translation",
+    )
+
+    MarqueeTextLine(text, color, style, translationX = { translationX })
+}
+
+@Composable
+private fun MarqueeTextLine(text: String, color: Color, style: TextStyle, translationX: () -> Float) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .wrapContentWidth(align = Alignment.Start, unbounded = true)
+            .graphicsLayer { this.translationX = translationX() },
+        color = color,
+        style = style,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+    )
 }
