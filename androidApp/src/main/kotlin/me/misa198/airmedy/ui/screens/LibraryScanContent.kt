@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -179,5 +180,5 @@ private suspend fun performScan(context: Context): LibraryScanUiState? = withCon
             artists = artists,
             completed = true,
         )
-    }.getOrNull()
+    }.onFailure { Log.w("AirmedyScan", "Library scan failed", it) }.getOrNull()
 }

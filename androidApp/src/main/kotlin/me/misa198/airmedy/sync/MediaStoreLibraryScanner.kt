@@ -9,7 +9,9 @@ import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.os.ext.SdkExtensions
 import android.provider.MediaStore
+import android.util.Log
 import android.util.Size
 import java.io.File
 import java.security.MessageDigest
@@ -110,14 +112,18 @@ internal class MediaStoreLibraryScanner(
         val tracks = mutableListOf<LocalTrack>()
         val albumRepresentatives = linkedMapOf<String, AlbumArtworkCandidate>()
 
-        contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            Projection,
-            Selection,
-            null,
-            SortOrder,
-        )?.use { cursor ->
-            val columns = Projection.associateWith { name -> cursor.getColumnIndex(name) }
+        queryWithAudioFormatFallback(deviceHasAudioFormatColumns()) { projection ->
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                Selection,
+                null,
+                SortOrder,
+            )
+        }?.use { cursor ->
+            // Columns missing from this cursor (e.g. audio-format ones on an older
+            // MediaProvider) resolve to -1 and read as null.
+            val columns = (BaseProjection + AudioFormatColumns).associateWith { name -> cursor.getColumnIndex(name) }
             fun text(name: String): String? = columns[name]?.takeIf { it >= 0 }?.let(cursor::getString)?.trim()
             fun number(name: String): Long? = columns[name]?.takeIf { it >= 0 }?.let(cursor::getLong)
 
@@ -411,11 +417,15 @@ internal class MediaStoreLibraryScanner(
         const val ColumnDateModified = MediaStore.Audio.Media.DATE_MODIFIED
         const val ColumnSize = MediaStore.Audio.Media.SIZE
         const val ColumnBitrate = MediaStore.Audio.Media.BITRATE
+        // Only requested when available; see AudioFormatColumns.
+        @android.annotation.SuppressLint("InlinedApi")
         const val ColumnSampleRate = MediaStore.Audio.AudioColumns.SAMPLERATE
+        @android.annotation.SuppressLint("InlinedApi")
         const val ColumnBitsPerSample = MediaStore.Audio.Media.BITS_PER_SAMPLE
         const val ColumnMimeType = MediaStore.Audio.Media.MIME_TYPE
 
-        val Projection: Array<String> = arrayOf(
+        /** Columns every supported MediaStore (API 31+) provides. */
+        val BaseProjection: Array<String> = arrayOf(
             ColumnId,
             ColumnData,
             ColumnTitle,
@@ -432,10 +442,16 @@ internal class MediaStoreLibraryScanner(
             ColumnDateModified,
             ColumnSize,
             ColumnBitrate,
-            ColumnSampleRate,
-            ColumnBitsPerSample,
             ColumnMimeType,
         )
+
+        /**
+         * SAMPLERATE / BITS_PER_SAMPLE exist from API 36, or on API 33-35 with T-extension
+         * level 15 (a MediaProvider module update); never on API 31-32. MediaProvider
+         * rejects the *whole* query for an unknown column ("Invalid column samplerate"),
+         * so they are only requested where available (see [hasAudioFormatColumns]).
+         */
+        val AudioFormatColumns: Array<String> = arrayOf(ColumnSampleRate, ColumnBitsPerSample)
 
         /** Guards against very short clips (voice memos, notification sounds) that
          *  IS_MUSIC alone doesn't reliably exclude on every OEM. Durations under 1s are
@@ -494,3 +510,33 @@ internal fun fileSha256(file: File): String = file.inputStream().use { input ->
 }
 
 private val ArtworkTargetPx = 2048
+
+/** Whether MediaStore has SAMPLERATE / BITS_PER_SAMPLE (see [MediaStoreLibraryScanner.AudioFormatColumns]). */
+internal fun hasAudioFormatColumns(sdkInt: Int, tiramisuExtensionVersion: Int): Boolean =
+    sdkInt >= 36 || (sdkInt >= Build.VERSION_CODES.TIRAMISU && tiramisuExtensionVersion >= 15)
+
+private fun deviceHasAudioFormatColumns(): Boolean {
+    val sdkInt = Build.VERSION.SDK_INT
+    val tiramisuExtension = if (sdkInt >= Build.VERSION_CODES.TIRAMISU) SdkExtensions.getExtensionVersion(Build.VERSION_CODES.TIRAMISU) else 0
+    return hasAudioFormatColumns(sdkInt, tiramisuExtension)
+}
+
+/** The scan projection, with the audio-format columns only when the device has them. */
+internal fun scanProjection(includeAudioFormatColumns: Boolean): Array<String> =
+    if (includeAudioFormatColumns) MediaStoreLibraryScanner.BaseProjection + MediaStoreLibraryScanner.AudioFormatColumns
+    else MediaStoreLibraryScanner.BaseProjection
+
+/**
+ * Runs the scan [query], and if a MediaProvider that doesn't match the documented
+ * availability rejects the audio-format columns (IllegalArgumentException "Invalid
+ * column"), retries once without them rather than failing the whole scan.
+ */
+internal fun <T> queryWithAudioFormatFallback(includeAudioFormatColumns: Boolean, query: (Array<String>) -> T): T {
+    if (!includeAudioFormatColumns) return query(scanProjection(false))
+    return try {
+        query(scanProjection(true))
+    } catch (error: IllegalArgumentException) {
+        Log.w("AirmedyScan", "MediaStore rejected the audio-format columns; scanning without sample rate/bit depth", error)
+        query(scanProjection(false))
+    }
+}
