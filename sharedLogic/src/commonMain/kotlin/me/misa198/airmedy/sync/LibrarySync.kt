@@ -99,7 +99,7 @@ interface LibrarySyncPuller {
     suspend fun asset(request: LibrarySyncRequest, asset: LibrarySyncAsset): PulledAsset
 }
 
-/** Android/iOS persist their native files and metadata, while the state machine remains shared. */
+/** The platform (Android) persists native files and metadata, while the state machine remains shared. */
 interface LibrarySyncStore {
     suspend fun prepare(request: LibrarySyncRequest, manifest: LibrarySyncManifest)
     suspend fun isAssetCommitted(planId: String, asset: LibrarySyncAsset): Boolean
