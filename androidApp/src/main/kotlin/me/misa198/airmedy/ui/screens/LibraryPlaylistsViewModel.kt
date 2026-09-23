@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +68,7 @@ internal class LibraryPlaylistsViewModel(private val context: Context, syncStore
                 playlistManualArtworkPath(playlist, artworkPaths),
             )
         })
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryPlaylistsUiState(isLoaded = false))
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryPlaylistsUiState(isLoaded = false))
 
     fun createPlaylist(rawName: String, artworkUri: Uri? = null, initialTrackIds: List<String> = emptyList()) {
         val name = rawName.trim()

@@ -2,9 +2,12 @@ package me.misa198.airmedy.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -24,7 +27,14 @@ data class GenreDetailsUiState(
     val tracks: List<LibraryTrack> = emptyList(),
     internal val allGenres: List<LibraryGenre> = emptyList(),
     internal val allAlbums: List<LibraryAlbum> = emptyList(),
-)
+) {
+    /**
+     * Tracks per genre id. Kept out of the constructor so it isn't part of equals(): the
+     * StateFlow and remember() compare states on the main thread. The ViewModel forces it on
+     * Dispatchers.Default (see indexByKeys).
+     */
+    internal val tracksByGenreId: Map<String, List<LibraryTrack>> by lazy { tracks.indexByKeys { it.genreIds() } }
+}
 
 internal class GenreDetailsViewModel(
     syncStore: AndroidLibrarySyncStore,
@@ -49,7 +59,10 @@ internal class GenreDetailsViewModel(
             allGenres = genres,
             allAlbums = albums,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GenreDetailsUiState())
+    }
+        // Build the lazy index here, on Dispatchers.Default, not on first read in composition.
+        .onEach { it.tracksByGenreId }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GenreDetailsUiState())
 
     fun play(genreId: String, shuffle: Boolean) {
         val tracks = genreDetailsUiStateFor(uiState.value, genreId).tracks
@@ -68,7 +81,7 @@ internal fun genreDetailsUiStateFor(
     genreId: String,
 ): GenreDetailsUiState {
     val genre = state.allGenres.firstOrNull { it.id == genreId }
-    val genreTracks = state.tracks.filter { genreId in it.genreIds() }
+    val genreTracks = state.tracksByGenreId[genreId].orEmpty()
     val tracksByAlbumId = genreTracks.groupBy { it.genreAlbumIdentifier() }
     val albums = state.allAlbums
         .filter { it.id in tracksByAlbumId }

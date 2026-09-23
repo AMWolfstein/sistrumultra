@@ -2,9 +2,12 @@ package me.misa198.airmedy.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -24,7 +27,14 @@ data class ComposerDetailsUiState(
     val tracks: List<LibraryTrack> = emptyList(),
     internal val allComposers: List<LibraryComposer> = emptyList(),
     internal val allAlbums: List<LibraryAlbum> = emptyList(),
-)
+) {
+    /**
+     * Tracks per composer id. Kept out of the constructor so it isn't part of equals(): the
+     * StateFlow and remember() compare states on the main thread. The ViewModel forces it on
+     * Dispatchers.Default (see indexByKeys).
+     */
+    internal val tracksByComposerId: Map<String, List<LibraryTrack>> by lazy { tracks.indexByKeys { it.composerIds() } }
+}
 
 internal class ComposerDetailsViewModel(
     syncStore: AndroidLibrarySyncStore,
@@ -49,7 +59,10 @@ internal class ComposerDetailsViewModel(
             allComposers = composers,
             allAlbums = albums,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ComposerDetailsUiState())
+    }
+        // Build the lazy index here, on Dispatchers.Default, not on first read in composition.
+        .onEach { it.tracksByComposerId }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ComposerDetailsUiState())
 
     fun play(composerId: String, shuffle: Boolean) {
         val tracks = composerDetailsUiStateFor(uiState.value, composerId).tracks
@@ -68,7 +81,7 @@ internal fun composerDetailsUiStateFor(
     composerId: String,
 ): ComposerDetailsUiState {
     val composer = state.allComposers.firstOrNull { it.id == composerId }
-    val composerTracks = state.tracks.filter { composerId in it.composerIds() }
+    val composerTracks = state.tracksByComposerId[composerId].orEmpty()
     val tracksByAlbumId = composerTracks.groupBy { it.composerAlbumIdentifier() }
     val albums = state.allAlbums
         .filter { it.id in tracksByAlbumId }

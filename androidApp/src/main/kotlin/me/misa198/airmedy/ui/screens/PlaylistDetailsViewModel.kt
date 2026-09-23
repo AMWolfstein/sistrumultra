@@ -4,9 +4,12 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.booleanOrNull
 import me.misa198.airmedy.player.PlaybackController
@@ -31,7 +34,10 @@ internal data class PlaylistDetailsUiState(
     internal val allTracks: List<LibraryTrack> = emptyList(),
     internal val artworkPathByKey: Map<String, String> = emptyMap(),
     internal val favoritesMetadata: String = "{}",
-)
+) {
+    /** Favorited track ids in library order. Outside equals() and forced on Dispatchers.Default by the ViewModel. */
+    internal val favoriteTrackIds: List<String> by lazy { allTracks.filter(LibraryTrack::isFavorite).map(LibraryTrack::id) }
+}
 
 internal class PlaylistDetailsViewModel(
     private val context: Context,
@@ -60,7 +66,10 @@ internal class PlaylistDetailsViewModel(
             artworkPathByKey = artworkPaths,
             favoritesMetadata = favoritesMetadata,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaylistDetailsUiState())
+    }
+        // Build the lazy index here, on Dispatchers.Default, not on first read in composition.
+        .onEach { it.favoriteTrackIds }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaylistDetailsUiState())
 
     fun play(playlistId: String, shuffle: Boolean) {
         val tracks = playlistDetailsUiStateFor(uiState.value, playlistId).tracks
@@ -123,7 +132,7 @@ internal fun playlistDetailsUiStateFor(
         ?: return PlaylistDetailsUiState()
     val tracksById = state.allTracks.associateBy { it.id }
     val playlist = if (basePlaylist.id == FavoritesPlaylistId) {
-        basePlaylist.copy(trackIds = state.allTracks.filter(LibraryTrack::isFavorite).map(LibraryTrack::id))
+        basePlaylist.copy(trackIds = state.favoriteTrackIds)
     } else {
         basePlaylist
     }
