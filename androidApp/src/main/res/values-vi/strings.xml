@@ -341,4 +341,5 @@
     <string name="lyrics_info_action">Thông tin lời bài hát</string>
     <string name="lyrics_info_title">Nguồn lời bài hát</string>
     <string name="lyrics_info_description">Lời bài hát được tự động lấy từ các nhà cung cấp đã bật (LRCLIB, KuGou) và lưu trên thiết bị.</string>
+    <string name="scan_found_nothing_library_kept">Không tìm thấy nhạc, thư viện được giữ nguyên. Hãy kiểm tra danh sách thư mục.</string>
 </resources>

@@ -349,4 +349,5 @@
     <string name="lyrics_info_action">Informations sur les paroles</string>
     <string name="lyrics_info_title">Sources des paroles</string>
     <string name="lyrics_info_description">Les paroles sont récupérées automatiquement auprès des fournisseurs activés (LRCLIB, KuGou) et mises en cache sur l\'appareil.</string>
+    <string name="scan_found_nothing_library_kept">Aucune musique trouvée, bibliothèque conservée. Vérifiez liste blanche/noire.</string>
 </resources>

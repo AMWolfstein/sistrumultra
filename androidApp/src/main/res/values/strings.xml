@@ -81,6 +81,7 @@
     <string name="scan_filter_mode_whitelist">Whitelist</string>
     <string name="scan_filter_mode_blacklist_desc">Scan everything except the folders listed below.</string>
     <string name="scan_filter_mode_whitelist_desc">Only scan the folders listed below.</string>
+    <string name="scan_found_nothing_library_kept">No music found, so the library was kept. Check your whitelist/blacklist.</string>
     <string name="scan_filter_folders_title">Folders</string>
     <string name="scan_filter_add_folder">Add folder</string>
     <string name="scan_filter_remove_folder">Remove folder</string>

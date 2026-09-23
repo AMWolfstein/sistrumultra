@@ -349,4 +349,5 @@
     <string name="lyrics_info_action">Informações das letras</string>
     <string name="lyrics_info_title">Fontes das letras</string>
     <string name="lyrics_info_description">As letras são obtidas automaticamente dos fornecedores ativados (LRCLIB, KuGou) e guardadas no dispositivo.</string>
+    <string name="scan_found_nothing_library_kept">Nenhuma música encontrada; biblioteca mantida. Verifique as listas de pastas.</string>
 </resources>

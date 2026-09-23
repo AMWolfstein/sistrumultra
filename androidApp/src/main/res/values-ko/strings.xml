@@ -341,4 +341,5 @@
     <string name="lyrics_info_action">가사 정보</string>
     <string name="lyrics_info_title">가사 데이터 소스</string>
     <string name="lyrics_info_description">가사는 활성화된 제공업체(LRCLIB, KuGou)에서 자동으로 가져와 기기에 저장됩니다.</string>
+    <string name="scan_found_nothing_library_kept">음악을 찾지 못해 라이브러리를 유지했습니다. 허용/차단 목록을 확인하세요.</string>
 </resources>

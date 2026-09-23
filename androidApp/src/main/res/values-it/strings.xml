@@ -349,4 +349,5 @@
     <string name="lyrics_info_action">Informazioni sui testi</string>
     <string name="lyrics_info_title">Fonti dei testi</string>
     <string name="lyrics_info_description">I testi vengono recuperati automaticamente dai provider abilitati (LRCLIB, KuGou) e salvati nella cache del dispositivo.</string>
+    <string name="scan_found_nothing_library_kept">Nessuna musica trovata, libreria invariata. Controlla whitelist/blacklist.</string>
 </resources>

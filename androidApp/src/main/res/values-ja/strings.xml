@@ -341,4 +341,5 @@
     <string name="lyrics_info_action">歌詞情報</string>
     <string name="lyrics_info_title">歌詞のデータソース</string>
     <string name="lyrics_info_description">歌詞は有効なプロバイダー（LRCLIB、KuGou）から自動取得され、端末に保存されます。</string>
+    <string name="scan_found_nothing_library_kept">音楽が見つからないため、ライブラリは変更されていません。許可/除外リストを確認してください。</string>
 </resources>

@@ -334,6 +334,9 @@ internal interface SyncDao {
     """)
     suspend fun activeTrackScanState(): List<PriorTrackScanRow>
 
+    @Query("SELECT COUNT(*) FROM sync_tracks t INNER JOIN sync_plans p ON p.planId = t.planId WHERE p.active = 1")
+    suspend fun activeTrackCount(): Int
+
     @Query("""
         SELECT a.assetId AS assetId, a.sha256 AS sha256, a.size AS size, a.relativePath AS relativePath
         FROM sync_assets a
@@ -830,14 +833,20 @@ internal class AndroidLibrarySyncStore(
         return PriorLibraryScanState(tracksByTrackId, artworkByArtworkKey)
     }
 
+    /**
+     * Returns false, leaving the existing library and its artwork untouched, when [snapshot]
+     * has no tracks but the active library does: an empty scan result (e.g. an empty
+     * whitelist) would otherwise replace the whole library and delete its covers.
+     */
     suspend fun writeLocalLibrary(
         snapshot: LocalLibrarySnapshot,
         audioRows: Map<String, LocalScanAudio>,
         artworkRows: List<LocalScanArtwork>,
-    ) {
+    ): Boolean {
         val planId = "local-${UUID.randomUUID()}"
         val artworkKeys = artworkRows.mapTo(mutableSetOf(), LocalScanArtwork::artworkKey)
-        val (stale, activePaths) = database.withTransaction {
+        val written = database.withTransaction {
+            if (snapshot.tracks.isEmpty() && dao.activeTrackCount() > 0) return@withTransaction null
             dao.insertPlan(SyncPlanEntity(planId, LocalDesktopId, localLibraryManifest(planId), "staging", false))
             val playCounts = dao.trackPlayCounts().associate { it.trackId to it.playCount }
             dao.insertAssets(buildList {
@@ -884,7 +893,8 @@ internal class AndroidLibrarySyncStore(
                 dao.deleteProviderLyricsNotInPlan(planId)
                 dao.deleteStalePlans(planId)
             } to active
-        }
+        } ?: return false
+        val (stale, activePaths) = written
         stale.forEach { asset ->
             if (asset.kind == "artwork") {
                 asset.relativePath
@@ -892,6 +902,7 @@ internal class AndroidLibrarySyncStore(
                     ?.let { File(filesDir, it).delete() }
             }
         }
+        return true
     }
 
     suspend fun recordListening(write: ListeningWrite) = database.withTransaction {

@@ -365,4 +365,5 @@
     <string name="lyrics_info_action">Информация о текстах</string>
     <string name="lyrics_info_title">Источники текстов</string>
     <string name="lyrics_info_description">Тексты автоматически получаются от включённых поставщиков (LRCLIB, KuGou) и сохраняются на устройстве.</string>
+    <string name="scan_found_nothing_library_kept">Музыка не найдена, медиатека не изменена. Проверьте белый/чёрный список.</string>
 </resources>

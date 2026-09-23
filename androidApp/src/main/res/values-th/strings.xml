@@ -341,4 +341,5 @@
     <string name="lyrics_info_action">ข้อมูลเนื้อเพลง</string>
     <string name="lyrics_info_title">แหล่งข้อมูลเนื้อเพลง</string>
     <string name="lyrics_info_description">เนื้อเพลงจะถูกดึงโดยอัตโนมัติจากผู้ให้บริการที่เปิดใช้งาน (LRCLIB, KuGou) และบันทึกไว้ในอุปกรณ์</string>
+    <string name="scan_found_nothing_library_kept">ไม่พบเพลง คลังเพลงจึงไม่เปลี่ยนแปลง โปรดตรวจสอบรายการอนุญาต/บล็อก</string>
 </resources>

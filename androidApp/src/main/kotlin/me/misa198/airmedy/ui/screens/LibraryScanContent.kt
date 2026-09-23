@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -167,11 +168,20 @@ private suspend fun performScan(context: Context): LibraryScanUiState? = withCon
         val syncStore = AndroidSyncRuntime.syncStore()
         val filter = ScanFilterPreferences(context).currentFilter()
         val result: LocalLibraryScanResult = scanner.scan(prior = syncStore.priorScanState(), filter = filter)
-        syncStore.writeLocalLibrary(
+        val written = syncStore.writeLocalLibrary(
             snapshot = result.snapshot,
             audioRows = result.audio,
             artworkRows = result.artwork,
         )
+        if (!written) {
+            // An empty result (most often an empty whitelist) would have replaced the whole
+            // library; writeLocalLibrary kept it instead, so tell the user why nothing changed.
+            Log.w("AirmedyScan", "Scan found no tracks; kept the existing library")
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context.applicationContext, R.string.scan_found_nothing_library_kept, Toast.LENGTH_LONG).show()
+            }
+            return@runCatching LibraryScanUiState()
+        }
         val albums = result.snapshot.tracks.map { it.album.id }.distinct().size
         val artists = result.snapshot.tracks.flatMap { it.artists }.map { it.id }.distinct().size
         LibraryScanUiState(

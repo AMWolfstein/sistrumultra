@@ -32,7 +32,7 @@ class PlaylistMutationPersistenceTest {
     private lateinit var filesDir: File
     private lateinit var store: AndroidLibrarySyncStore
 
-    @Before fun setUp() = runBlocking {
+    @Before fun setUp(): Unit = runBlocking {
         database = Room.inMemoryDatabaseBuilder(context, SyncDatabase::class.java).build()
         filesDir = File(context.cacheDir, "playlist-mutation-test-${System.nanoTime()}").apply { mkdirs() }
         store = AndroidLibrarySyncStore(database, filesDir)
@@ -43,6 +43,7 @@ class PlaylistMutationPersistenceTest {
             audioRows = emptyMap(),
             artworkRows = emptyList(),
         )
+        Unit
     }
 
     @After fun tearDown() {

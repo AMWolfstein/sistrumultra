@@ -341,4 +341,5 @@
     <string name="lyrics_info_action">歌词信息</string>
     <string name="lyrics_info_title">歌词数据源</string>
     <string name="lyrics_info_description">歌词会从已启用的来源（LRCLIB、KuGou）自动获取并保存在设备上。</string>
+    <string name="scan_found_nothing_library_kept">未找到音乐，资料库保持不变。请检查白名单/黑名单。</string>
 </resources>

@@ -349,4 +349,5 @@
     <string name="lyrics_info_action">Lyrics information</string>
     <string name="lyrics_info_title">Lyrics sources</string>
     <string name="lyrics_info_description">Lyrics are fetched automatically from the enabled providers (LRCLIB, KuGou) and cached on the device.</string>
+    <string name="scan_found_nothing_library_kept">No music found, so the library was kept. Check your whitelist/blacklist.</string>
 </resources>
