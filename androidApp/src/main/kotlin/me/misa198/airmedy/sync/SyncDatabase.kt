@@ -653,6 +653,14 @@ internal class AndroidLibrarySyncStore(
         projectPlaylists(rows, local, pending.mapNotNull(PlaylistMutationEntity::toPlaylistMutation))
             .sortedBy { it.name.lowercase() }
     }.shareIn(snapshotScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+    /**
+     * Metadata of the Favorites playlist with its pending mutations (custom artwork) applied.
+     * Favorites has no base playlist row, so [playlists] can't carry these; the screens that
+     * add Favorites themselves (playlistsWithFavorites) use this instead.
+     */
+    val favoritesMetadata: Flow<String> = projectedPlaylistMutations.map { pending ->
+        favoritesMetadataFrom(pending.mapNotNull(PlaylistMutationEntity::toPlaylistMutation))
+    }.shareIn(snapshotScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
     val artworkPaths: Flow<Map<String, String>> = combine(artworkAssets, dao.observePlaylistArtwork()) { assets, staged ->
         (assets.map { asset -> asset.assetId.removePrefix("artwork:") to asset.relativePath } + staged.map { artwork -> artwork.sha256 to artwork.relativePath }).toMap()
     }.shareIn(snapshotScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
@@ -725,7 +733,7 @@ internal class AndroidLibrarySyncStore(
     suspend fun setFavorite(trackId: String, favorite: Boolean) {
         val mutation = PlaylistMutation(
             mutationId = UUID.randomUUID().toString(),
-            playlistId = "favorites",
+            playlistId = FavoritesId,
             operation = PlaylistMutationOperation.SET_FAVORITE,
             updatedAt = System.currentTimeMillis(),
             payload = PlaylistMutationPayload(trackId = trackId, isFavorite = favorite),
@@ -1039,6 +1047,9 @@ internal fun applyPendingPlaylistMutations(
     return projected.values.toList()
 }
 
+/** The Favorites playlist id (it has no playlist row; its state is its mutations). */
+private const val FavoritesId = "favorites"
+
 private val ArtworkReleasingOperations = setOf(
     PlaylistMutationOperation.DELETE,
     PlaylistMutationOperation.SET_ARTWORK,
@@ -1079,6 +1090,13 @@ internal fun projectPlaylists(
     }
     return applyPendingPlaylistMutations(base + mutationOnly, pending)
 }
+
+/** Favorites' metadata after its own pending mutations (e.g. SET_ARTWORK/REMOVE_ARTWORK). */
+internal fun favoritesMetadataFrom(pending: List<PlaylistMutation>): String =
+    applyPendingPlaylistMutations(
+        listOf(LibraryPlaylist(FavoritesId, "", emptyList(), "{}")),
+        pending.filter { it.playlistId == FavoritesId },
+    ).single().metadataJson
 
 /** Artwork hashes shown by some existing playlist; everything else staged is unused. */
 internal fun playlistArtworkInUse(

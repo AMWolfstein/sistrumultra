@@ -30,6 +30,7 @@ internal data class PlaylistDetailsUiState(
     internal val playlists: List<LibraryPlaylist> = emptyList(),
     internal val allTracks: List<LibraryTrack> = emptyList(),
     internal val artworkPathByKey: Map<String, String> = emptyMap(),
+    internal val favoritesMetadata: String = "{}",
 )
 
 internal class PlaylistDetailsViewModel(
@@ -51,11 +52,13 @@ internal class PlaylistDetailsViewModel(
         syncStore.playlists,
         syncStore.tracks,
         syncStore.artworkPaths,
-    ) { playlists, tracks, artworkPaths ->
+        syncStore.favoritesMetadata,
+    ) { playlists, tracks, artworkPaths, favoritesMetadata ->
         PlaylistDetailsUiState(
             playlists = playlists,
             allTracks = tracks,
             artworkPathByKey = artworkPaths,
+            favoritesMetadata = favoritesMetadata,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaylistDetailsUiState())
 
@@ -116,7 +119,7 @@ internal fun playlistDetailsUiStateFor(
     state: PlaylistDetailsUiState,
     playlistId: String,
 ): PlaylistDetailsUiState {
-    val basePlaylist = playlistsWithFavorites(state.playlists).firstOrNull { it.id == playlistId }
+    val basePlaylist = playlistsWithFavorites(state.playlists, favoritesMetadata = state.favoritesMetadata).firstOrNull { it.id == playlistId }
         ?: return PlaylistDetailsUiState()
     val tracksById = state.allTracks.associateBy { it.id }
     val playlist = if (basePlaylist.id == FavoritesPlaylistId) {

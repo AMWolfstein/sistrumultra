@@ -55,9 +55,10 @@ internal class LibraryPlaylistsViewModel(private val context: Context, syncStore
         syncStore.playlists,
         syncStore.tracks,
         syncStore.artworkPaths,
-    ) { playlists, tracks, artworkPaths ->
+        syncStore.favoritesMetadata,
+    ) { playlists, tracks, artworkPaths, favoritesMetadata ->
         val availableTrackIds = tracks.mapTo(mutableSetOf(), LibraryTrack::id)
-        LibraryPlaylistsUiState(isLoaded = true, playlists = playlistsWithFavorites(playlists, tracks).map { playlist ->
+        LibraryPlaylistsUiState(isLoaded = true, playlists = playlistsWithFavorites(playlists, tracks, favoritesMetadata).map { playlist ->
             PlaylistListItem(
                 playlist.id,
                 playlist.name,
@@ -165,12 +166,14 @@ internal class LibraryPlaylistsViewModel(private val context: Context, syncStore
 
 internal const val FavoritesPlaylistId = "favorites"
 
+/** Favorites has no playlist row; [favoritesMetadata] carries its custom artwork (see AndroidLibrarySyncStore.favoritesMetadata). */
 internal fun playlistsWithFavorites(
     playlists: List<LibraryPlaylist>,
     tracks: List<LibraryTrack> = emptyList(),
+    favoritesMetadata: String = "{}",
 ): List<LibraryPlaylist> {
     val favorites = playlists.firstOrNull { it.id == FavoritesPlaylistId }
-        ?: LibraryPlaylist(FavoritesPlaylistId, "", emptyList(), "{}")
+        ?: LibraryPlaylist(FavoritesPlaylistId, "", emptyList(), favoritesMetadata)
     val derivedFavorites = favorites.copy(trackIds = tracks.filter(LibraryTrack::isFavorite).map(LibraryTrack::id))
     return listOf(derivedFavorites) + playlists.filterNot { it.id == FavoritesPlaylistId }
 }
