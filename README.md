@@ -145,17 +145,13 @@ days and daily origin-tagged aggregates (keyed by `sourceDeviceId`) are
 retained for all-time totals. Recording is local-only: there is no exchange, and
 the tag is the install's stable `DeviceIdentity`.
 
-## Playlist reconciliation
+## Playlist edits
 
 Playlist edits are queued locally in Room as mutations (`CREATE`, `UPDATE`,
 `DELETE`, `ADD_TRACK`, `REMOVE_TRACK`, `MOVE_TRACK`, `SET_ARTWORK`,
-`REMOVE_ARTWORK`, `SET_FAVORITE`). Each pending mutation is applied to the
-projected local library immediately and tracked through `pending` /
-`awaiting_sync` states in `playlist_mutations`. A playlist whose queue still
-carries an unacknowledged mutation is marked `syncFailed` on its row; the flag
-clears once the queue is flushed. Artwork for `SET_ARTWORK` is staged in Room
-with its SHA-256, MIME type, and byte size, and cached below `filesDir`.
-
-The former desktop upload adapter (`AndroidPlaylistReconciliationTransport`) is
-retained compilable for its host test but is not constructed at runtime: there
-is no desktop endpoint to reconcile with, so playlist mutations stay local.
+`REMOVE_ARTWORK`, `SET_FAVORITE`) in `playlist_mutations`. Each pending mutation
+is applied to the projected local library immediately. There is no desktop to
+reconcile with, so mutations stay local and are never acknowledged; repeated
+edits to the same target collapse into one row (see `queuePlaylistMutation`).
+Artwork for `SET_ARTWORK` is staged in Room with its SHA-256, MIME type, and
+byte size, and cached below `filesDir`.
