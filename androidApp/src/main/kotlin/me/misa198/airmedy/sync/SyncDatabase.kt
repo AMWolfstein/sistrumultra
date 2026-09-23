@@ -224,7 +224,8 @@ internal interface SyncDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAssets(values: List<SyncAssetEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertTracks(values: List<SyncTrackEntity>)
     @Insert suspend fun insertSearchDocuments(values: List<LibrarySearchDocumentEntity>)
-    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertPlaylistMutation(value: PlaylistMutationEntity)
+    // REPLACE: repeated edits share a stable dedupe id (see queuePlaylistMutation) and must overwrite the earlier row.
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertPlaylistMutation(value: PlaylistMutationEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertLocalPlaylist(value: LocalPlaylistEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertPlaylistArtwork(value: PlaylistArtworkStagingEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertArtistArtwork(value: ArtistArtworkStagingEntity)
