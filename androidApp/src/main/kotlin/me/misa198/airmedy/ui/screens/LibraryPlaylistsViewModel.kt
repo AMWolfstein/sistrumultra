@@ -17,16 +17,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import me.misa198.airmedy.sync.AndroidLibrarySyncStore
 import me.misa198.airmedy.sync.LibraryPlaylist
-import me.misa198.airmedy.sync.LibrarySyncProtocol
 import me.misa198.airmedy.sync.LibraryTrack
 import me.misa198.airmedy.sync.PlaylistMutation
 import me.misa198.airmedy.sync.PlaylistMutationOperation
 import me.misa198.airmedy.sync.PlaylistMutationPayload
+import me.misa198.airmedy.sync.playlistArtworkKey
 import me.misa198.airmedy.sync.stagePlaylistArtwork
 import java.util.UUID
 
@@ -138,12 +135,7 @@ internal class LibraryPlaylistsViewModel(private val context: Context, syncStore
                     Log.w("LibraryPlaylists", "Ignoring unreadable playlist artwork", error)
                     null
                 }
-                staged?.let {
-                    syncStore.stagePlaylistArtwork(it)
-                    syncStore.queuePlaylistMutation(
-                        PlaylistMutation(UUID.randomUUID().toString(), playlistId, PlaylistMutationOperation.SET_ARTWORK, updatedAt + 1, PlaylistMutationPayload(artworkSha256 = it.sha256)),
-                    )
-                }
+                staged?.let { syncStore.setPlaylistArtwork(playlistId, it, updatedAt + 1) }
             }
             if (clearArtwork) {
                 syncStore.queuePlaylistMutation(
@@ -198,9 +190,3 @@ internal fun playlistManualArtworkPath(
     playlist: LibraryPlaylist,
     artworkPaths: Map<String, String>,
 ): String? = playlistArtworkKey(playlist.metadataJson)?.let(artworkPaths::get)
-
-private fun playlistArtworkKey(metadataJson: String): String? = runCatching {
-    val root = LibrarySyncProtocol.json.parseToJsonElement(metadataJson) as? JsonObject
-    val playlist = root?.get("playlist") as? JsonObject ?: root
-    (playlist?.get("artwork_key") as? JsonPrimitive)?.contentOrNull
-}.getOrNull()?.takeIf { it.isNotBlank() }
