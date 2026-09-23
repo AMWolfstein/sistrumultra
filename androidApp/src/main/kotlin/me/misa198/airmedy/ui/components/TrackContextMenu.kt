@@ -138,14 +138,6 @@ fun TrackContextMenu(
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     var detailSheet by remember(track.id) { mutableStateOf<TrackContextBottomSheetRequest?>(null) }
-    val artists = remember(track.metadataJson) { trackContextArtists(track) }
-    val hasAlbum = track.albumId.isNotBlank() && track.album.isNotBlank()
-    val hasArtists = track.artists.isNotBlank() && artists.isNotEmpty()
-    val hasNavigationActions = actions.goToAlbum && hasAlbum || actions.goToArtists && hasArtists
-    val queueAvailability = remember(track.id, playbackQueue) {
-        trackContextQueueAvailability(track.id, playbackQueue)
-    }
-    val favorite = track.isFavorite()
     val moodRadio = LocalMoodRadioMenuActions.current
     val showMoodRadio = actions.moodRadio || track.id in moodRadio.eligibleTrackIds
     val dismissAll = {
@@ -177,6 +169,14 @@ fun TrackContextMenu(
         hazeState = hazeState,
         anchor = anchor,
     ) {
+        // Every row in a list hosts a closed menu, so the metadata JSON parsing and queue
+        // lookups run here, where the host only composes the menu while it is open.
+        val artists = remember(track.metadataJson) { trackContextArtists(track) }
+        val hasAlbum = track.albumId.isNotBlank() && track.album.isNotBlank()
+        val hasArtists = track.artists.isNotBlank() && artists.isNotEmpty()
+        val hasNavigationActions = actions.goToAlbum && hasAlbum || actions.goToArtists && hasArtists
+        val queueAvailability = trackContextQueueAvailability(track.id, playbackQueue)
+        val favorite = remember(track.metadataJson) { track.isFavorite() }
         val entries = buildList {
             if (actions.removeFromQueue) {
                 add(ContextActionMenuEntry.Action(stringResource(R.string.track_context_remove_from_queue), MaterialSymbols.RemoveFromQueue, destructive = true) { closeAfter { onRemoveFromQueue(track) } })

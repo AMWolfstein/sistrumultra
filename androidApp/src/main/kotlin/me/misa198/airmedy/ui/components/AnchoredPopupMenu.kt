@@ -27,7 +27,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -197,25 +198,23 @@ fun AnchoredPopupMenu(
 ) {
     val host = LocalAnchoredPopupMenuHost.current
     val id = remember { Any() }
-    var anchorRightPx by remember { mutableStateOf<Float?>(null) }
-    var anchorTopPx by remember { mutableStateOf<Float?>(null) }
-    var anchorBottomPx by remember { mutableStateOf<Float?>(null) }
+    // Anchors sit on every list row, so hold on to the coordinates and measure the bounds
+    // only when the menu is shown, instead of on every scroll frame.
+    val anchorCoordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
 
     DisposableEffect(host, id) {
         onDispose { host?.dismiss(id) }
     }
 
     SideEffect {
-        val right = anchorRightPx
-        val top = anchorTopPx
-        val bottom = anchorBottomPx
-        if (expanded && host != null && right != null && top != null && bottom != null) {
+        val bounds = if (expanded) anchorCoordinates[0]?.takeIf { it.isAttached }?.boundsInRoot() else null
+        if (host != null && bounds != null) {
             host.show(
                 AnchoredPopupMenuRequest(
                     id = id,
-                    anchorRightPx = right,
-                    anchorTopPx = top,
-                    anchorBottomPx = bottom,
+                    anchorRightPx = bounds.right,
+                    anchorTopPx = bounds.top,
+                    anchorBottomPx = bounds.bottom,
                     offset = offset,
                     width = width,
                     shape = shape,
@@ -230,13 +229,7 @@ fun AnchoredPopupMenu(
     }
 
     Box(
-        modifier = modifier.onGloballyPositioned { coordinates ->
-            coordinates.boundsInRoot().let { bounds ->
-                anchorRightPx = bounds.right
-                anchorTopPx = bounds.top
-                anchorBottomPx = bounds.bottom
-            }
-        },
+        modifier = modifier.onPlaced { coordinates -> anchorCoordinates[0] = coordinates },
     ) {
         anchor()
     }
