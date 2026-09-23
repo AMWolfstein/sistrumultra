@@ -33,17 +33,14 @@ fun AirmedyPlayingIndicator(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalAirmedyColors.current
-    val transition = rememberInfiniteTransition(label = "playing-indicator")
-    val scales = listOf(
-        transition.animateScale(0.3f, 0.8f, 800, "playing-indicator-first"),
-        transition.animateScale(1f, 0.4f, 600, "playing-indicator-second"),
-        transition.animateScale(0.6f, 0.9f, 700, "playing-indicator-third"),
-    )
     val playbackProgress by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
         animationSpec = tween(220, easing = FastOutSlowInEasing),
         label = "playing-indicator-playback-progress",
     )
+    // Once paused and the 220 ms settle has finished, the bars are flat (scaleY 0.3 whatever
+    // the scale), so drop the infinite transition instead of ticking it every frame.
+    val scales = if (isPlaying || playbackProgress > 0f) animatedBarScales() else StaticBarScales
 
     Row(
         modifier = modifier.testTag("playing_indicator").height(18.dp),
@@ -56,13 +53,24 @@ fun AirmedyPlayingIndicator(
                     .width(3.dp)
                     .fillMaxHeight()
                     .graphicsLayer {
-                        scaleY = 0.3f + (scale.value - 0.3f) * playbackProgress
+                        scaleY = 0.3f + (scale() - 0.3f) * playbackProgress
                         transformOrigin = TransformOrigin(0.5f, 1f)
                     }
                     .background(colors.onPrimary, RoundedCornerShape(2.dp)),
             )
         }
     }
+}
+
+private val StaticBarScales: List<() -> Float> = List(3) { { 0.3f } }
+
+@Composable
+private fun animatedBarScales(): List<() -> Float> {
+    val transition = rememberInfiniteTransition(label = "playing-indicator")
+    val first = transition.animateScale(0.3f, 0.8f, 800, "playing-indicator-first")
+    val second = transition.animateScale(1f, 0.4f, 600, "playing-indicator-second")
+    val third = transition.animateScale(0.6f, 0.9f, 700, "playing-indicator-third")
+    return listOf({ first.value }, { second.value }, { third.value })
 }
 
 @Composable
