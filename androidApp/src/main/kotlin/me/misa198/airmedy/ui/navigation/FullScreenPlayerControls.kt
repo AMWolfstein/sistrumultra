@@ -124,7 +124,7 @@ internal fun FullScreenPlayerControls(
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
-    onOpenMediaOutputSwitcher: () -> Unit,
+    onOpenMediaOutputSwitcher: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalAirmedyColors.current
@@ -254,7 +254,8 @@ internal fun FullScreenPlayerControls(
                 Spacer(Modifier.height(4.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     FullScreenControlSlot { FullScreenTransportButton(MaterialSymbols.Chat, stringResource(R.string.player_lyrics), { onPanelSelected(if (lyricsSelected) null else FullScreenPlayerPanel.Lyrics) }, iconSize = 24.dp, tint = lyricsIcon, containerColor = lyricsBackground, filled = false) }
-                    FullScreenControlSlot { FullScreenTransportButton(MaterialSymbols.Airplay, stringResource(R.string.player_cast), onOpenMediaOutputSwitcher, iconSize = 24.dp, tint = colors.foregroundSubtle, filled = false) }
+                    // Empty slot when there is no output switcher, so Lyrics and Queue keep their positions.
+                    FullScreenControlSlot { onOpenMediaOutputSwitcher?.let { FullScreenTransportButton(MaterialSymbols.Airplay, stringResource(R.string.player_cast), it, iconSize = 24.dp, tint = colors.foregroundSubtle, filled = false) } }
                     FullScreenControlSlot {
                         Box(Modifier.size(64.dp)) {
                             FullScreenTransportButton(MaterialSymbols.QueueMusic, stringResource(R.string.player_queue), { onPanelSelected(if (queueSelected) null else FullScreenPlayerPanel.Queue) }, iconSize = 24.dp, tint = queueIcon, containerColor = queueBackground, filled = false)

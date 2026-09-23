@@ -104,7 +104,7 @@ internal fun FullScreenPlayer(
     onTrackGoToArtist: (String) -> Unit = {},
     onTrackContextBottomSheet: (TrackContextBottomSheetRequest) -> Unit = {},
     onCloseFullscreenThen: ((() -> Unit) -> Unit) = { action -> action() },
-    onOpenMediaOutputSwitcher: () -> Unit,
+    onOpenMediaOutputSwitcher: (() -> Unit)?,
     onDismiss: () -> Unit,
     onDismissAnimationFinished: () -> Unit = {},
     modifier: Modifier = Modifier,

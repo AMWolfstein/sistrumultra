@@ -206,7 +206,8 @@ internal data class PlaybackModel(
     val onRepeatModeChange: (RepeatMode) -> Unit = {},
     val onSystemVolumeChange: (Float) -> Unit = {},
     val onMiniPlayerDismiss: () -> Unit = {},
-    val onOpenMediaOutputSwitcher: () -> Unit = {},
+    /** Null where the system output switcher is unavailable (below Android 14); the Cast button is then hidden. */
+    val onOpenMediaOutputSwitcher: (() -> Unit)? = null,
     val onFavoriteToggle: (String, Boolean) -> Unit = { _, _ -> },
     val onTrackPlayNext: (String) -> Unit = {},
     val onTrackAddToQueue: (String) -> Unit = {},

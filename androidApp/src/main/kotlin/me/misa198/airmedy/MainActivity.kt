@@ -437,7 +437,7 @@ class MainActivity : ComponentActivity() {
                     systemMusicVolumeState = currentSystemMusicVolume()
                 },
                 onMiniPlayerDismiss = playbackController::clearQueue,
-                onOpenMediaOutputSwitcher = ::openMediaOutputSwitcher,
+                onOpenMediaOutputSwitcher = if (canShowSystemMediaOutputSwitcher(Build.VERSION.SDK_INT)) ::openMediaOutputSwitcher else null,
             )
             App(
                 uiState = uiState,

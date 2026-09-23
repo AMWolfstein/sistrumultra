@@ -645,6 +645,18 @@ class AppNavigationTest {
     }
 
     @Test
+    fun fullScreenPlayerHidesCastButtonWithoutAnOutputSwitcher() {
+        // MainActivity passes no switcher below Android 14, where the system one doesn't exist.
+        composeTestRule.setContent {
+            App(playback = PlaybackModel(state = playingState, onOpenMediaOutputSwitcher = null))
+        }
+
+        composeTestRule.onNodeWithText(playingItem.title).performClick()
+        composeTestRule.onNodeWithContentDescription(string(R.string.player_lyrics)).assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription(string(R.string.player_cast)).assertDoesNotExist()
+    }
+
+    @Test
     fun fullScreenPlayerArtworkAndMetadataSwipesDispatchTransport() {
         var nextRequests = 0
         var previousRequests = 0
