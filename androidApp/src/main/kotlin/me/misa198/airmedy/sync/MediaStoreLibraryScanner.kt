@@ -137,7 +137,7 @@ internal class MediaStoreLibraryScanner(
                 val artistName = text(ColumnArtist) ?: ""
                 val albumArtistName = text(ColumnAlbumArtist)?.takeIf(String::isNotBlank) ?: artistName
                 val albumName = text(ColumnAlbum) ?: ""
-                val key = albumKey(text(ColumnAlbumKey), artistName, albumName)
+                val key = albumKey(number(ColumnAlbumId), albumArtistName, albumName)
                 val artworkKey = albumArtworkKey(key)
                 val dateAdded = number(ColumnDateAdded) ?: 0L
                 val dateModified = number(ColumnDateModified) ?: 0L
@@ -408,7 +408,7 @@ internal class MediaStoreLibraryScanner(
         const val ColumnArtist = MediaStore.Audio.Media.ARTIST
         const val ColumnAlbumArtist = MediaStore.Audio.Media.ALBUM_ARTIST
         const val ColumnAlbum = MediaStore.Audio.Media.ALBUM
-        const val ColumnAlbumKey = MediaStore.Audio.Media.ALBUM_KEY
+        const val ColumnAlbumId = MediaStore.Audio.Media.ALBUM_ID
         const val ColumnComposer = MediaStore.Audio.Media.COMPOSER
         const val ColumnDuration = MediaStore.Audio.Media.DURATION
         const val ColumnDiscNumber = MediaStore.Audio.Media.DISC_NUMBER
@@ -433,7 +433,7 @@ internal class MediaStoreLibraryScanner(
             ColumnArtist,
             ColumnAlbumArtist,
             ColumnAlbum,
-            ColumnAlbumKey,
+            ColumnAlbumId,
             ColumnComposer,
             ColumnDuration,
             ColumnDiscNumber,
@@ -474,9 +474,14 @@ internal class MediaStoreLibraryScanner(
     }
 }
 
-/** Deterministic album key: MediaStore's own key when present, else derived from artist + album. */
-internal fun albumKey(columnValue: String?, artist: String, album: String): String =
-    columnValue?.takeIf { it.isNotBlank() } ?: sha256Hex("$artist|$album").take(12)
+/**
+ * Deterministic album key. MediaStore's ALBUM_ID distinguishes same-named albums (it hashes
+ * the album name with the album artist, or the folder when there is none); ALBUM_KEY, used
+ * before, is the album name alone and merged e.g. two artists' "Greatest Hits". Without an
+ * ALBUM_ID, falls back to the album artist (the track artist when untagged) + album name.
+ */
+internal fun albumKey(mediaStoreAlbumId: Long?, albumArtist: String, album: String): String =
+    mediaStoreAlbumId?.takeIf { it != 0L }?.toString() ?: sha256Hex("$albumArtist|$album").take(12)
 
 internal fun artistId(name: String): String = "local:artist:" + sha256Hex(foldDiacritics(name)).take(16)
 
