@@ -127,7 +127,6 @@
     <string name="bottom_sheet_back">Back</string>
     <string name="create">Create</string>
     <string name="save">Save</string>
-    <string name="playlist_sync_failed">Could not save changes to this playlist</string>
     <string name="playlist_details_title">Playlist</string>
     <string name="playlist_details_empty_title">Playlist unavailable</string>
     <string name="playlist_details_empty_description">No tracks from this playlist are available in your library.</string>

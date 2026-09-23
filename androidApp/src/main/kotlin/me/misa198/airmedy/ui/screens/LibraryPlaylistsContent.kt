@@ -72,7 +72,6 @@ internal fun LibraryPlaylistsContent(
                 playlist.id,
                 if (playlist.isFavorite) stringResource(R.string.library_favorites) else playlist.name,
                 playlist.artworkPaths,
-                syncFailed = playlist.syncFailed,
                 onClick = { onPlaylistClick(playlist.id) },
                 onLongClick = { contextPlaylistId = playlist.id },
             )

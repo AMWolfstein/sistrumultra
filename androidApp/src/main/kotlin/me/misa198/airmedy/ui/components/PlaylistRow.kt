@@ -38,7 +38,6 @@ internal fun PlaylistRow(
     name: String,
     artworkPaths: List<String>,
     modifier: Modifier = Modifier,
-    syncFailed: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {},
 ) {
@@ -56,14 +55,6 @@ internal fun PlaylistRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (syncFailed) {
-                Text(
-                    text = stringResource(R.string.playlist_sync_failed),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.textMuted,
-                    maxLines = 1,
-                )
-            }
         }
         IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
             MaterialSymbol(

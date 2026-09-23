@@ -36,7 +36,6 @@ internal data class PlaylistListItem(
     val trackIds: List<String> = emptyList(),
     val artworkPaths: List<String> = emptyList(),
     val customArtworkPath: String? = null,
-    val syncFailed: Boolean = false,
 ) { val isFavorite: Boolean get() = id == FavoritesPlaylistId }
 
 internal data class LibraryPlaylistsUiState(
@@ -68,7 +67,6 @@ internal class LibraryPlaylistsViewModel(private val context: Context, syncStore
                 playlist.trackIds.filter { it in availableTrackIds },
                 playlistArtworkPaths(playlist, tracks, artworkPaths),
                 playlistManualArtworkPath(playlist, artworkPaths),
-                playlist.syncFailed,
             )
         })
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryPlaylistsUiState(isLoaded = false))
@@ -158,7 +156,6 @@ internal class LibraryPlaylistsViewModel(private val context: Context, syncStore
     fun deletePlaylist(playlistId: String) {
         if (playlistId == FavoritesPlaylistId) return
         viewModelScope.launch {
-            if (syncStore.discardFailedLocalPlaylist(playlistId)) return@launch
             syncStore.queuePlaylistMutation(
                 PlaylistMutation(UUID.randomUUID().toString(), playlistId, PlaylistMutationOperation.DELETE, System.currentTimeMillis()),
             )

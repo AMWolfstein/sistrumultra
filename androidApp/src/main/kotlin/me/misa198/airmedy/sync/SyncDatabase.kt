@@ -292,10 +292,8 @@ internal interface SyncDao {
     @Query("SELECT * FROM playlist_mutations WHERE state = 'pending' ORDER BY updatedAt, mutationId") suspend fun pendingPlaylistMutations(): List<PlaylistMutationEntity>
     @Query("SELECT * FROM playlist_mutations WHERE state IN ('pending', 'awaiting_sync') ORDER BY updatedAt, mutationId") fun observeProjectedPlaylistMutations(): Flow<List<PlaylistMutationEntity>>
     @Query("SELECT * FROM local_playlists ORDER BY name COLLATE NOCASE") fun observeLocalPlaylists(): Flow<List<LocalPlaylistEntity>>
-    @Query("UPDATE local_playlists SET syncState = :state WHERE mutationId IN (:mutationIds)") suspend fun setLocalPlaylistSyncState(mutationIds: List<String>, state: String)
     @Query("DELETE FROM local_playlists WHERE playlistId IN (:playlistIds)") suspend fun deleteLocalPlaylists(playlistIds: List<String>)
     @Query("SELECT playlistId FROM local_playlists WHERE mutationId IN (:mutationIds)") suspend fun localPlaylistIdsForMutations(mutationIds: List<String>): List<String>
-    @Query("DELETE FROM local_playlists WHERE playlistId = :playlistId AND syncState = 'failed'") suspend fun deleteFailedLocalPlaylist(playlistId: String): Int
     @Query("DELETE FROM playlist_mutations WHERE playlistId = :playlistId") suspend fun deletePlaylistMutations(playlistId: String)
     @Query("SELECT * FROM playlist_artwork_staging") fun observePlaylistArtwork(): Flow<List<PlaylistArtworkStagingEntity>>
     @Query("DELETE FROM playlist_artwork_staging WHERE sha256 IN (:hashes)") suspend fun deletePlaylistArtwork(hashes: List<String>)
@@ -472,7 +470,7 @@ data class LibraryTrack(
 )
 
 internal data class LibraryPlaylistRow(val id: String, val name: String, val trackIdsJson: String, val rawJson: String)
-data class LibraryPlaylist(val id: String, val name: String, val trackIds: List<String>, val metadataJson: String, val syncFailed: Boolean = false)
+data class LibraryPlaylist(val id: String, val name: String, val trackIds: List<String>, val metadataJson: String)
 
 /** Reads non-indexed desktop metadata without requiring a Room schema change. */
 fun LibraryTrack.metadataObject(): JsonObject? = runCatching {
@@ -664,7 +662,7 @@ internal class AndroidLibrarySyncStore(
         val syncedIds = synced.mapTo(mutableSetOf(), LibraryPlaylist::id)
         val projected = synced + local.filter { it.playlistId !in syncedIds }.map { row ->
             val metadata = row.artworkSha256?.let { hash -> "{\"playlist\":{\"artwork_key\":\"$hash\"}}" } ?: "{}"
-            LibraryPlaylist(row.playlistId, row.name, emptyList(), metadata, syncFailed = row.syncState == "failed")
+            LibraryPlaylist(row.playlistId, row.name, emptyList(), metadata)
         }
         applyPendingPlaylistMutations(projected, pending.mapNotNull(PlaylistMutationEntity::toPlaylistMutation))
             .sortedBy { it.name.lowercase() }
@@ -754,22 +752,11 @@ internal class AndroidLibrarySyncStore(
         }
     }
 
-    suspend fun markLocalPlaylistMutationsFailed(ids: List<String>) {
-        if (ids.isNotEmpty()) dao.setLocalPlaylistSyncState(ids, "failed")
-    }
-
     suspend fun discardLocalPlaylistsForMutations(ids: List<String>) = database.withTransaction {
         val playlistIds = dao.localPlaylistIdsForMutations(ids)
         dao.deleteLocalPlaylists(playlistIds)
         for (playlistId in playlistIds) dao.deletePlaylistMutations(playlistId)
     }.also { cleanupAcknowledgedPlaylistArtwork() }
-
-    /** A rejected local-only playlist has no desktop state to delete; discard its failed queue instead. */
-    suspend fun discardFailedLocalPlaylist(playlistId: String): Boolean = database.withTransaction {
-        if (dao.deleteFailedLocalPlaylist(playlistId) == 0) return@withTransaction false
-        dao.deletePlaylistMutations(playlistId)
-        true
-    }.also { discarded -> if (discarded) cleanupAcknowledgedPlaylistArtwork() }
 
     suspend fun stagePlaylistArtwork(value: StagedPlaylistArtwork) {
         require(value.sha256.matches(Regex("^[0-9a-f]{64}$")) && value.mime in setOf("image/jpeg", "image/png", "image/webp"))
