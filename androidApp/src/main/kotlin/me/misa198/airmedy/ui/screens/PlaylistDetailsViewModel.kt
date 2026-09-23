@@ -1,5 +1,6 @@
 package me.misa198.airmedy.ui.screens
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -32,16 +33,18 @@ internal data class PlaylistDetailsUiState(
 )
 
 internal class PlaylistDetailsViewModel(
+    private val context: Context,
     private val syncStore: AndroidLibrarySyncStore,
     private val playbackController: PlaybackController,
 ) : ViewModel() {
     class Factory(
+        private val context: Context,
         private val store: AndroidLibrarySyncStore,
         private val playback: PlaybackController,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            PlaylistDetailsViewModel(store, playback) as T
+            PlaylistDetailsViewModel(context, store, playback) as T
     }
 
     val uiState: StateFlow<PlaylistDetailsUiState> = combine(
@@ -72,30 +75,34 @@ internal class PlaylistDetailsViewModel(
     fun removeTrack(playlistId: String, trackId: String) {
         if (playlistId == FavoritesPlaylistId || trackId.isBlank()) return
         viewModelScope.launch {
-            syncStore.queuePlaylistMutation(
-                PlaylistMutation(
-                    mutationId = UUID.randomUUID().toString(),
-                    playlistId = playlistId,
-                    operation = PlaylistMutationOperation.REMOVE_TRACK,
-                    updatedAt = System.currentTimeMillis(),
-                    payload = PlaylistMutationPayload(trackId = trackId),
-                ),
-            )
+            runPlaylistWrite(context) {
+                syncStore.queuePlaylistMutation(
+                    PlaylistMutation(
+                        mutationId = UUID.randomUUID().toString(),
+                        playlistId = playlistId,
+                        operation = PlaylistMutationOperation.REMOVE_TRACK,
+                        updatedAt = System.currentTimeMillis(),
+                        payload = PlaylistMutationPayload(trackId = trackId),
+                    ),
+                )
+            }
         }
     }
 
     fun moveTrack(playlistId: String, trackId: String, previousTrackId: String?, nextTrackId: String?) {
         if (playlistId == FavoritesPlaylistId || trackId.isBlank()) return
         viewModelScope.launch {
-            syncStore.queuePlaylistMutation(
-                PlaylistMutation(
-                    mutationId = UUID.randomUUID().toString(),
-                    playlistId = playlistId,
-                    operation = PlaylistMutationOperation.MOVE_TRACK,
-                    updatedAt = System.currentTimeMillis(),
-                    payload = PlaylistMutationPayload(trackId = trackId, previousTrackId = previousTrackId, nextTrackId = nextTrackId),
-                ),
-            )
+            runPlaylistWrite(context) {
+                syncStore.queuePlaylistMutation(
+                    PlaylistMutation(
+                        mutationId = UUID.randomUUID().toString(),
+                        playlistId = playlistId,
+                        operation = PlaylistMutationOperation.MOVE_TRACK,
+                        updatedAt = System.currentTimeMillis(),
+                        payload = PlaylistMutationPayload(trackId = trackId, previousTrackId = previousTrackId, nextTrackId = nextTrackId),
+                    ),
+                )
+            }
         }
     }
 }

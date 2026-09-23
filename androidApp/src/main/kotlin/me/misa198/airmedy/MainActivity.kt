@@ -49,6 +49,7 @@ import me.misa198.airmedy.lastfm.isLastFmAuthCallback
 import me.misa198.airmedy.lyrics.AndroidLyricsService
 import me.misa198.airmedy.lyrics.LyricsPreferences
 import kotlin.math.roundToInt
+import me.misa198.airmedy.ui.screens.runPlaylistWrite
 import me.misa198.airmedy.ui.screens.LibraryTracksViewModel
 import me.misa198.airmedy.ui.screens.LibraryArtistsViewModel
 import me.misa198.airmedy.ui.screens.LibraryAlbumsViewModel
@@ -109,7 +110,7 @@ class MainActivity : ComponentActivity() {
         AlbumDetailsViewModel.Factory(AndroidSyncRuntime.syncStore(), AndroidPlaybackRuntime.controller())
     }
     private val playlistDetailsViewModel: PlaylistDetailsViewModel by viewModels {
-        PlaylistDetailsViewModel.Factory(AndroidSyncRuntime.syncStore(), AndroidPlaybackRuntime.controller())
+        PlaylistDetailsViewModel.Factory(applicationContext, AndroidSyncRuntime.syncStore(), AndroidPlaybackRuntime.controller())
     }
     private val artistDetailsViewModel: ArtistDetailsViewModel by viewModels {
         ArtistDetailsViewModel.Factory(AndroidSyncRuntime.syncStore(), AndroidPlaybackRuntime.controller())
@@ -307,7 +308,9 @@ class MainActivity : ComponentActivity() {
                         onAddToQueue = playbackController::append,
                         onAddToFavorites = { trackIds ->
                             preferenceScope.launch {
-                                trackIds.forEach { trackId -> AndroidSyncRuntime.syncStore().setFavorite(trackId, true) }
+                                runPlaylistWrite(applicationContext) {
+                                    trackIds.forEach { trackId -> AndroidSyncRuntime.syncStore().setFavorite(trackId, true) }
+                                }
                             }
                         },
                     ),
@@ -423,8 +426,8 @@ class MainActivity : ComponentActivity() {
                 onRepeatModeChange = playbackController::setRepeatMode,
                 onFavoriteToggle = { trackId, favorite ->
                     preferenceScope.launch {
-                        AndroidSyncRuntime.syncStore().setFavorite(trackId, favorite)
-                        lastFm.setLoved(trackId, favorite)
+                        val saved = runPlaylistWrite(applicationContext) { AndroidSyncRuntime.syncStore().setFavorite(trackId, favorite) }
+                        if (saved) lastFm.setLoved(trackId, favorite)
                     }
                 },
                 onTrackPlayNext = playbackController::playNext,

@@ -127,6 +127,7 @@
     <string name="bottom_sheet_back">Voltar</string>
     <string name="create">Criar</string>
     <string name="save">Guardar</string>
+    <string name="playlist_save_failed">Não foi possível guardar as alterações desta playlist</string>
     <string name="playlist_details_title">Playlist</string>
     <string name="playlist_details_empty_title">Playlist indisponível</string>
     <string name="playlist_details_empty_description">Nenhuma faixa desta playlist está disponível na sua biblioteca.</string>

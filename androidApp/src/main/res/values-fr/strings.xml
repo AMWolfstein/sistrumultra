@@ -127,6 +127,7 @@
     <string name="bottom_sheet_back">Retour</string>
     <string name="create">Créer</string>
     <string name="save">Enregistrer</string>
+    <string name="playlist_save_failed">Impossible d\'enregistrer les modifications de cette playlist</string>
     <string name="playlist_details_title">Playlist</string>
     <string name="playlist_details_empty_title">Playlist indisponible</string>
     <string name="playlist_details_empty_description">Aucun titre de cette playlist n\'est disponible dans votre bibliothèque.</string>

@@ -127,6 +127,7 @@
     <string name="bottom_sheet_back">กลับ</string>
     <string name="create">สร้าง</string>
     <string name="save">บันทึก</string>
+    <string name="playlist_save_failed">ไม่สามารถบันทึกการเปลี่ยนแปลงเพลย์ลิสต์นี้ได้</string>
     <string name="playlist_details_title">เพลย์ลิสต์</string>
     <string name="playlist_details_empty_title">เพลย์ลิสต์ไม่พร้อมใช้งาน</string>
     <string name="playlist_details_empty_description">ไม่มีเพลงใดในเพลย์ลิสต์นี้อยู่ในคลังของคุณ</string>
