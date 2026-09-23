@@ -67,6 +67,7 @@ internal fun FullScreenPlayerMetadataTransition(
     displayedHorizontalSwipeOffset: Float,
     hazeState: HazeState?,
     compact: Boolean,
+    isPlaying: Boolean,
     isFavorite: Boolean,
     onFavoriteToggle: (String, Boolean) -> Unit,
     contextTrack: LibraryTrack?,
@@ -94,7 +95,7 @@ internal fun FullScreenPlayerMetadataTransition(
         label = "full-screen-player-metadata-crossfade",
     ) { animatedItem ->
         FullScreenPlayerMetadata(
-            animatedItem, displayedHorizontalSwipeOffset, hazeState, compact, isFavorite, onFavoriteToggle,
+            animatedItem, displayedHorizontalSwipeOffset, hazeState, compact, isPlaying, isFavorite, onFavoriteToggle,
             contextTrack, contextMenuExpanded, onContextMenuOpen, onContextMenuDismiss, playbackQueue,
             onTrackPlayNext, onTrackAddToQueue, moodRadioEligibleTrackIds, onStartMoodRadio, onTrackGoToAlbum, onTrackGoToArtist,
             onTrackContextBottomSheet, onCloseFullscreenThen,
@@ -108,6 +109,7 @@ private fun FullScreenPlayerMetadata(
     displayedHorizontalSwipeOffset: Float,
     hazeState: HazeState?,
     compact: Boolean,
+    isPlaying: Boolean,
     isFavorite: Boolean,
     onFavoriteToggle: (String, Boolean) -> Unit,
     contextTrack: LibraryTrack?,
@@ -140,8 +142,8 @@ private fun FullScreenPlayerMetadata(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).clipToBounds().graphicsLayer { translationX = displayedHorizontalSwipeOffset }
             .semantics { testTag = FullScreenPlayerMetadataSwipeTestTag }) {
-            AirmedyMarqueeText(item.title, colors.onPrimary, if (compact) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-            AirmedyMarqueeText(item.artist, colors.foregroundSubtle, if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium)
+            AirmedyMarqueeText(item.title, colors.onPrimary, if (compact) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), animate = isPlaying)
+            AirmedyMarqueeText(item.artist, colors.foregroundSubtle, if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium, animate = isPlaying)
         }
         Spacer(Modifier.width(4.dp))
         if (!compact) AirmedyIconButton(

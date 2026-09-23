@@ -392,8 +392,9 @@ internal fun MiniPlayer(
                         item.title,
                         colors.textMain,
                         MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        animate = isPlaying,
                     )
-                    AirmedyMarqueeText(item.artist, colors.textMuted, MaterialTheme.typography.bodySmall)
+                    AirmedyMarqueeText(item.artist, colors.textMuted, MaterialTheme.typography.bodySmall, animate = isPlaying)
                 }
             }
         }
