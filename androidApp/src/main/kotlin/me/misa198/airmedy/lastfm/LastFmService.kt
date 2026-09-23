@@ -3,6 +3,7 @@ package me.misa198.airmedy.lastfm
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -11,6 +12,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.io.File
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -233,7 +235,7 @@ class LastFmService internal constructor(
                 "Unable to download Last.fm avatar"
             }
             require(connection.contentLengthLong <= MaxAvatarBytes) { "Last.fm avatar is too large" }
-            val bytes = connection.inputStream.use { it.readNBytes(MaxAvatarBytes + 1) }
+            val bytes = connection.inputStream.use { it.readNBytesCompat(MaxAvatarBytes + 1) }
             require(bytes.size <= MaxAvatarBytes) { "Last.fm avatar is too large" }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -349,5 +351,24 @@ private suspend fun AndroidLibrarySyncStore.lastFmTrack(trackId: String): LastFm
 }
 
 private fun encode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
+
+/** [InputStream.readNBytes] needs API 33 (minSdk is 31); same semantics on older devices. */
+internal fun InputStream.readNBytesCompat(len: Int): ByteArray =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) readNBytes(len) else readNBytesFallback(len)
+
+/** Reads until [len] bytes are read or EOF, returning fewer only at EOF (readNBytes semantics). */
+internal fun InputStream.readNBytesFallback(len: Int): ByteArray {
+    require(len >= 0) { "len < 0" }
+    val out = java.io.ByteArrayOutputStream(minOf(len, 8192))
+    val buffer = ByteArray(minOf(len, 8192).coerceAtLeast(1))
+    var remaining = len
+    while (remaining > 0) {
+        val read = read(buffer, 0, minOf(buffer.size, remaining))
+        if (read < 0) break
+        out.write(buffer, 0, read)
+        remaining -= read
+    }
+    return out.toByteArray()
+}
 private fun encode(value: ByteArray): String = Base64.encodeToString(value, Base64.NO_WRAP)
 private fun decode(value: String): ByteArray = Base64.decode(value, Base64.NO_WRAP)
