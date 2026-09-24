@@ -536,6 +536,11 @@ internal fun AppDestinationContent(
                                 onAddToQueue = onArtistAddToQueue,
                                 onTrackContextBottomSheet = onArtistTrackContextBottomSheet,
                                 onAddArtistImage = { artistImagePicker.launch("image/*") },
+                                onRemoveArtistImage = {
+                                    selectedArtistId?.let { artistId ->
+                                        artistImagePickerScope.launch { runCatching { AndroidSyncRuntime.syncStore().clearArtistArtwork(artistId) } }
+                                    }
+                                },
                                 onAlbumClick = { album -> onIntent(AppIntent.OpenAlbumDetails(album.id)) },
                                 playbackQueue = playbackQueue,
                             )

@@ -20,6 +20,8 @@ internal fun ArtistContextMenu(
     onAddToQueue: (List<String>) -> Unit = {},
     onBottomSheetRequested: (TrackContextBottomSheetRequest) -> Unit = {},
     onAddArtistImage: () -> Unit = {},
+    /** Shown only when the artist has a custom image to remove. */
+    onRemoveArtistImage: (() -> Unit)? = null,
     addToPlaylistOnly: Boolean = false,
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
@@ -59,6 +61,13 @@ internal fun ArtistContextMenu(
                     closeAfter { onAddArtistImage() }
                 },
             )
+            onRemoveArtistImage?.let { remove ->
+                add(
+                    ContextActionMenuEntry.Action(stringResource(R.string.artist_remove_image), MaterialSymbols.Delete, destructive = true) {
+                        closeAfter { remove() }
+                    },
+                )
+            }
         })
     }
 }

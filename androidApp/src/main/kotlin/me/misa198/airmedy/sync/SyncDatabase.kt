@@ -299,6 +299,8 @@ internal interface SyncDao {
     @Query("DELETE FROM playlist_artwork_staging WHERE sha256 IN (:hashes)") suspend fun deletePlaylistArtwork(hashes: List<String>)
     @Query("SELECT * FROM artist_artwork_staging") fun observeArtistArtwork(): Flow<List<ArtistArtworkStagingEntity>>
     @Query("DELETE FROM artist_artwork_staging WHERE artistId IN (:artistIds)") suspend fun deleteArtistArtwork(artistIds: List<String>)
+    @Query("SELECT * FROM artist_artwork_staging WHERE artistId = :artistId") suspend fun artistArtwork(artistId: String): ArtistArtworkStagingEntity?
+    @Query("SELECT COUNT(*) FROM artist_artwork_staging WHERE relativePath = :relativePath") suspend fun artistArtworkPathUseCount(relativePath: String): Int
     @Query("""
         SELECT t.trackId AS id,
                t.title AS title,
@@ -503,6 +505,8 @@ data class LibraryArtist(
     val createdAt: String = "",
     val artworkPath: String? = null,
     val sortName: String = "",
+    /** The user set an image for this artist on this device (removable). */
+    val hasCustomArtwork: Boolean = false,
 )
 
 data class LibraryAlbum(
@@ -626,9 +630,11 @@ internal class AndroidLibrarySyncStore(
         artworkAssets,
         dao.observeArtistArtwork(),
     ) { rows, artworkAssets, stagedArtwork ->
+        val customArtworkArtistIds = stagedArtwork.mapTo(mutableSetOf(), ArtistArtworkStagingEntity::artistId)
         libraryArtistsFrom(rows, artworkAssets.associate { asset ->
             asset.assetId.removePrefix("artwork:") to asset.relativePath
         } + stagedArtwork.associate { staging -> staging.artistId to staging.relativePath })
+            .map { artist -> if (artist.id in customArtworkArtistIds) artist.copy(hasCustomArtwork = true) else artist }
     }.shareIn(snapshotScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
     val albums: Flow<List<LibraryAlbum>> = combine(
         activeTrackRows,
@@ -787,10 +793,27 @@ internal class AndroidLibrarySyncStore(
     suspend fun stageArtistArtwork(value: StagedArtistArtwork) {
         require(value.sha256.matches(Regex("^[0-9a-f]{64}$")) && value.mime in setOf("image/jpeg", "image/png", "image/webp"))
         require(!value.relativePath.startsWith('/') && ".." !in value.relativePath.split('/'))
-        dao.insertArtistArtwork(ArtistArtworkStagingEntity(value.artistId, value.sha256, value.mime, value.size, value.relativePath))
+        val replaced = database.withTransaction {
+            val previous = dao.artistArtwork(value.artistId)
+            dao.insertArtistArtwork(ArtistArtworkStagingEntity(value.artistId, value.sha256, value.mime, value.size, value.relativePath))
+            previous?.relativePath
+        }
+        deleteArtistArtworkFileIfUnused(replaced)
     }
 
-    suspend fun clearArtistArtwork(artistId: String) = dao.deleteArtistArtwork(listOf(artistId))
+    /** Removes the artist's custom image: its row, and its file unless another artist uses it. */
+    suspend fun clearArtistArtwork(artistId: String) {
+        val removed = database.withTransaction {
+            dao.artistArtwork(artistId)?.relativePath.also { dao.deleteArtistArtwork(listOf(artistId)) }
+        }
+        deleteArtistArtworkFileIfUnused(removed)
+    }
+
+    /** Files are named by content hash, so two artists can share one; keep it while any row uses it. */
+    private suspend fun deleteArtistArtworkFileIfUnused(relativePath: String?) {
+        if (relativePath == null || dao.artistArtworkPathUseCount(relativePath) > 0) return
+        deleteStagedArtistArtworkFile(filesDir, relativePath)
+    }
 
 
     fun providerLyrics(trackId: String): Flow<String?> = dao.observeProviderLyrics(trackId)
@@ -1124,6 +1147,10 @@ internal fun playlistArtworkKey(metadataJson: String): String? = runCatching {
     val playlist = root?.get("playlist") as? JsonObject ?: root
     (playlist?.get("artwork_key") as? JsonPrimitive)?.contentOrNull
 }.getOrNull()?.takeIf { it.isNotBlank() }
+
+/** Deletes an unused custom artist image, only ever below `filesDir/artist-artwork/`. */
+internal fun deleteStagedArtistArtworkFile(filesDir: File, relativePath: String): Boolean =
+    relativePath.startsWith("artist-artwork/") && ".." !in relativePath.split('/') && File(filesDir, relativePath).delete()
 
 /** Deletes unused staged artwork files, only ever below `filesDir/playlist-artwork/`. */
 internal fun deleteStagedPlaylistArtworkFiles(filesDir: File, relativePaths: List<String>): Int =

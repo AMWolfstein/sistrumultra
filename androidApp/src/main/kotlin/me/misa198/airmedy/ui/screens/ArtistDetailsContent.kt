@@ -48,6 +48,7 @@ internal fun ArtistDetailsContent(
     onAddToQueue: (List<String>) -> Unit = {},
     onTrackContextBottomSheet: (TrackContextBottomSheetRequest) -> Unit = {},
     onAddArtistImage: () -> Unit = {},
+    onRemoveArtistImage: () -> Unit = {},
     onAlbumClick: (LibraryAlbum) -> Unit = {},
     playbackQueue: PlaybackQueueSnapshot = PlaybackQueueSnapshot(),
 ) {
@@ -77,6 +78,7 @@ internal fun ArtistDetailsContent(
                     onAddToQueue = onAddToQueue,
                     onBottomSheetRequested = onTrackContextBottomSheet,
                     onAddArtistImage = onAddArtistImage,
+                    onRemoveArtistImage = onRemoveArtistImage.takeIf { artist.hasCustomArtwork },
                     addToPlaylistOnly = true,
                     hazeState = hazeState,
                     playbackQueue = playbackQueue,
