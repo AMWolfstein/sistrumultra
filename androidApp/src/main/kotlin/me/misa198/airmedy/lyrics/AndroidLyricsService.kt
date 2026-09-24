@@ -240,7 +240,7 @@ internal class KugouLyricsProvider(
                         candidate.accesskey
                     )?.let { content ->
                         return FetchedLyric(
-                            content,
+                            decodeLyricsHtml(content),
                             if (SyncedLrc.containsMatchIn(content)) "kugou-synced" else "kugou-plain"
                         )
                     }
