@@ -166,7 +166,7 @@ internal class MediaStoreLibraryScanner(
                 // single-disc, 12-track album).
                 val rawTrack = number(ColumnTrackNumber) ?: 0L
                 val trackNumber = if (rawTrack > 1000) (rawTrack % 1000).toInt() else rawTrack.toInt()
-                val format = mime.substringAfter("audio/", mime).ifBlank { data.substringAfterLast('.', "").lowercase() }
+                val format = audioFormatOf(mime, data)
                 if (size > 0L) {
                     audio[trackId] = LocalScanAudio(
                         trackId = trackId,
@@ -261,11 +261,11 @@ internal class MediaStoreLibraryScanner(
      * The M4A/MP4 container's mime type ("audio/mp4") doesn't distinguish the actual
      * codec inside it (e.g. AAC vs. ALAC), which previously made every M4A file
      * misreport as Lossy quality. Sniff the real per-track codec via MediaExtractor's
-     * own demuxer for m4a/mp4; other containers' mime already names their one codec.
+     * own demuxer for m4a/mp4; other formats name their one codec, so it is the format.
      */
     private fun realCodec(format: String, mime: String, path: String): String {
-        val fallback = mime.substringAfter("audio/", mime)
-        if (format != "mp4" && format != "m4a") return fallback
+        if (format != "mp4" && format != "m4a") return format
+        val fallback = mimeSubtype(mime)
         return runCatching {
             val extractor = MediaExtractor()
             try {
@@ -473,6 +473,48 @@ internal class MediaStoreLibraryScanner(
         val ArtworkTargetSize = Size(1024, 1024)
     }
 }
+
+/**
+ * Canonical format name ("mp3", "wav", "aiff", "m4a", ...) for a MediaStore MIME type.
+ * MediaStore's subtype is often not a format name ("mpeg", "x-wav", "alac") and is
+ * sometimes uninformative ("audio/ffmpeg" for anything its own parser doesn't know,
+ * e.g. AIFF), so any subtype that isn't a known format falls back to the file extension.
+ */
+internal fun audioFormatOf(mime: String, path: String): String {
+    val extension = path.substringAfterLast('/').substringAfterLast('.', "").lowercase()
+    val subtype = mimeSubtype(mime)
+    val fromMime = FormatBySubtype[subtype]
+    // An MP4-family MIME type says nothing about .mp4 vs .m4a; keep the file's own name.
+    if (fromMime == "m4a" && extension == "mp4") return "mp4"
+    return fromMime
+        ?: extension.takeIf(String::isNotEmpty)?.let { FormatByExtension[it] ?: it }
+        ?: subtype.takeUnless { it in GenericAudioMimeSubtypes }?.removePrefix("x-")
+        ?: ""
+}
+
+private fun mimeSubtype(mime: String): String =
+    mime.lowercase().substringBefore(';').trim().let { if (it.startsWith("audio/")) it.removePrefix("audio/") else "" }
+
+/** Subtypes never used as a last-resort format name: MediaStore's catch-all, generic binaries. */
+private val GenericAudioMimeSubtypes = setOf("", "ffmpeg", "unknown", "octet-stream", "*")
+
+private val FormatBySubtype = mapOf(
+    "mpeg" to "mp3", "mp3" to "mp3", "mpeg3" to "mp3", "x-mpeg" to "mp3", "x-mp3" to "mp3", "mpg" to "mp3",
+    "wav" to "wav", "x-wav" to "wav", "wave" to "wav", "vnd.wave" to "wav",
+    "aiff" to "aiff", "x-aiff" to "aiff",
+    "flac" to "flac", "x-flac" to "flac",
+    "mp4" to "m4a", "m4a" to "m4a", "x-m4a" to "m4a", "alac" to "m4a",
+    "aac" to "aac", "x-aac" to "aac", "aacp" to "aac",
+    "x-ape" to "ape", "ape" to "ape", "x-wavpack" to "wv", "wavpack" to "wv",
+    "x-dsf" to "dsf", "dsf" to "dsf", "x-dff" to "dff", "dff" to "dff",
+    // Kept as "ogg" (not "opus"): existing libraries store Opus-in-Ogg this way.
+    "ogg" to "ogg", "x-ogg" to "ogg", "vorbis" to "ogg", "opus" to "opus",
+    "x-ms-wma" to "wma",
+)
+
+private val FormatByExtension = mapOf(
+    "wave" to "wav", "aif" to "aiff", "aifc" to "aiff", "m4b" to "m4a", "oga" to "ogg", "mpga" to "mp3",
+)
 
 /**
  * Deterministic album key. MediaStore's ALBUM_ID distinguishes same-named albums (it hashes

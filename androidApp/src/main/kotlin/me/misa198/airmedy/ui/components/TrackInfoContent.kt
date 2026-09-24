@@ -93,14 +93,15 @@ internal fun trackAudioQuality(track: LibraryTrack): TrackAudioQuality {
     val bitDepth = metadata.int("bit_depth")
     val sampleRate = metadata.long("sample_rate")
 
-    // The scanner stores MP3 as "mpeg" (from its audio/mpeg MIME type).
+    // Canonical names come from the scanner's audioFormatOf. "mpeg", "x-wav" and "alac"
+    // are the raw MIME-derived names stored before it, kept until the next rescan.
     if (format in setOf("mp3", "mpeg", "aac", "ogg", "opus")) return TrackAudioQuality.Lossy
     if (format in setOf("dsf", "dff")) return TrackAudioQuality.Dsd
     if (format in setOf("m4a", "mp4")) {
         if (codec.isBlank()) return TrackAudioQuality.Unknown
         if (codec !in setOf("alac", "flac")) return TrackAudioQuality.Lossy
     }
-    if (format in setOf("flac", "wav", "aiff", "ape", "wv", "m4a", "mp4")) {
+    if (format in setOf("flac", "wav", "x-wav", "aiff", "alac", "ape", "wv", "m4a", "mp4")) {
         return if (bitDepth > 16 || (sampleRate ?: 0) > 48_000) TrackAudioQuality.HiRes else TrackAudioQuality.Lossless
     }
     return TrackAudioQuality.Unknown

@@ -52,6 +52,12 @@ class TrackInfoContentTest {
     }
 
     @Test
+    fun rawMimeFormatsStoredBeforeNormalizationStillGetBadgesUntilTheNextRescan() {
+        assertEquals(TrackAudioQuality.Lossless, trackAudioQuality(track("""{"format":"x-wav","codec":"x-wav","bit_depth":16,"sample_rate":44100}""")))
+        assertEquals(TrackAudioQuality.Lossless, trackAudioQuality(track("""{"format":"alac","codec":"alac","sample_rate":44100}""")))
+    }
+
+    @Test
     fun flacInsideAnMp4ContainerIsLossless() {
         assertEquals(TrackAudioQuality.Lossless, trackAudioQuality(track("""{"format":"mp4","codec":"flac","bit_depth":16,"sample_rate":44100}""")))
         assertEquals(TrackAudioQuality.HiRes, trackAudioQuality(track("""{"format":"mp4","codec":"flac","bit_depth":24,"sample_rate":96000}""")))
