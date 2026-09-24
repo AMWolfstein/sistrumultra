@@ -1,10 +1,10 @@
 package me.misa198.airmedy.lyrics
 
-import android.util.Base64
 import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Base64
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -216,7 +216,9 @@ internal class LrclibLyricsProvider : LyricsProvider() {
     }
 }
 
-internal class KugouLyricsProvider : LyricsProvider() {
+internal class KugouLyricsProvider(
+    private val fetchText: suspend (base: String, params: Map<String, String>) -> String? = ::request,
+) : LyricsProvider() {
     override fun enabled(settings: LyricsSettings) = settings.kugou
     override suspend fun fetch(track: LyricsTrack): FetchedLyric? {
         var title = normalizeLyricsText(removeFeaturedLyricsTitle(track.title));
@@ -258,8 +260,8 @@ internal class KugouLyricsProvider : LyricsProvider() {
                 kugouDownload(candidate.id, candidate.accesskey)?.takeIf(String::isNotBlank)?.let { content ->
                     LyricsSearchResult(
                         provider = "kugou",
-                        trackName = title,
-                        artistName = artist,
+                        trackName = candidate.song.ifBlank { title },
+                        artistName = candidate.singer.ifBlank { artist },
                         duration = candidate.duration / 1000,
                         content = decodeLyricsHtml(content),
                         source = if (SyncedLrc.containsMatchIn(content)) "kugou-synced" else "kugou-plain",
@@ -269,7 +271,7 @@ internal class KugouLyricsProvider : LyricsProvider() {
         }.awaitAll().filterNotNull()
     }
 
-    private suspend fun kugouSearch(keyword: String, duration: Int): List<KugouCandidate> = request(
+    private suspend fun kugouSearch(keyword: String, duration: Int): List<KugouCandidate> = fetchText(
         "http://krcs.kugou.com/search",
         mapOf(
             "ver" to "1",
@@ -284,7 +286,7 @@ internal class KugouLyricsProvider : LyricsProvider() {
         ?.let { ProviderJson.decodeFromString(KugouSearch.serializer(), it).candidates }
         ?: emptyList()
 
-    private suspend fun kugouDownload(id: String, key: String): String? = request(
+    private suspend fun kugouDownload(id: String, key: String): String? = fetchText(
         "https://lyrics.kugou.com/download",
         mapOf(
             "ver" to "1",
@@ -296,7 +298,7 @@ internal class KugouLyricsProvider : LyricsProvider() {
         )
     )
         ?.let { ProviderJson.decodeFromString(KugouDownload.serializer(), it).content }
-        ?.let { Base64.decode(it, Base64.DEFAULT).toString(Charsets.UTF_8) }
+        ?.let { Base64.getMimeDecoder().decode(it).toString(Charsets.UTF_8) }
 
 }
 
