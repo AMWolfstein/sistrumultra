@@ -11,12 +11,18 @@ fun normalizeLyricsText(value: String): String = value
 fun removeFeaturedLyricsTitle(value: String): String = value
     .replace(Regex("(?i)\\s*[\\(\\[]fe?a?t\\.?\\s*[^\\)\\]]+[\\)\\]]"), "").trim()
 
+/**
+ * Scores a candidate against the track, or -1 when it doesn't match. A track whose own
+ * duration is unknown (0) can't be compared by duration, so only title and artist count.
+ */
 fun lyricsCandidateScore(candidate: LyricsCandidate, title: String, artist: String, durationSeconds: Int): Double {
     val titleSimilarity = lyricsSimilarity(normalizeLyricsText(candidate.title), title)
     if (titleSimilarity < .7) return -1.0
+    val textScore = titleSimilarity * .5 + lyricsSimilarity(normalizeLyricsText(candidate.artist), artist) * .3
+    if (durationSeconds <= 0) return textScore
     val difference = abs(candidate.durationSeconds - durationSeconds)
     if (difference > 5.0) return -1.0
-    return titleSimilarity * .5 + lyricsSimilarity(normalizeLyricsText(candidate.artist), artist) * .3 + (1 - difference / 5) * .2
+    return textScore + (1 - difference / 5) * .2
 }
 
 fun bestLyricsCandidate(candidates: List<LyricsCandidate>, title: String, artist: String, durationSeconds: Int): LyricsCandidate? =
