@@ -5,12 +5,12 @@ import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -45,6 +45,7 @@ internal abstract class LyricsProvider {
 
 internal class AndroidLyricsService(
     private val library: AndroidLibrarySyncStore,
+    /** In priority order: local sources first, then the network providers. */
     private val providers: List<LyricsProvider> = listOf(
         EmbeddedLyricsProvider(),
         SidecarLyricsProvider(),
@@ -60,26 +61,14 @@ internal class AndroidLyricsService(
             return
         }
         Log.d("AirmedyLyrics", "Fetching lyrics for ${track.title} from ${active.size} provider(s)")
-        val lyric = coroutineScope {
-            val results = Channel<Result<FetchedLyric?>>(active.size)
-            val jobs =
-                active.map { provider -> async { results.send(runCatching { provider.fetch(track) }) } }
-            repeat(active.size) {
-                val result = results.receive()
-                result.exceptionOrNull()?.let { Log.w("AirmedyLyrics", "Lyrics provider failed", it) }
-                result.getOrNull()?.let {
-                    jobs.forEach { job -> job.cancel() }
-                    return@coroutineScope it
-                }
-            }
-            null
-        }
+        val lyric = firstLyric(active, track)
         lyric?.let {
             library.saveProviderLyrics(trackId, it.content, it.source)
             Log.d("AirmedyLyrics", "Fetched lyrics from ${it.source}")
         } ?: Log.d("AirmedyLyrics", "No lyrics found for ${track.title}")
     }
 
+    /** Manual search: every enabled provider in parallel, since the picker shows all candidates. */
     suspend fun search(trackId: String, title: String, artist: String, settings: LyricsSettings): List<LyricsSearchResult> {
         if (title.isBlank()) return emptyList()
         val duration = library.lyricsTrack(trackId)?.duration ?: 0
@@ -93,12 +82,31 @@ internal class AndroidLyricsService(
             }.awaitAll().flatten()
         }
     }
+}
 
+/**
+ * Tries [providers] one at a time in order and returns the first lyric found, so a
+ * lower-priority provider (e.g. a network one) is never contacted once a higher one has
+ * lyrics. A failing provider is logged and skipped; cancellation propagates.
+ */
+internal suspend fun firstLyric(providers: List<LyricsProvider>, track: LyricsTrack): FetchedLyric? {
+    for (provider in providers) {
+        val lyric = try {
+            provider.fetch(track)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("AirmedyLyrics", "Lyrics provider ${provider::class.simpleName} failed", e)
+            null
+        }
+        if (lyric != null) return lyric
+    }
+    return null
 }
 
 /**
  * Reads lyrics embedded in the audio file itself (FLAC/OGG `LYRICS`/`UNSYNCEDLYRICS`,
- * MP3 ID3v2 `USLT`/`ULT`). Always local, so it is tried first and wins the fetch race.
+ * MP3 ID3v2 `USLT`/`ULT`). Always local, so it is tried first.
  */
 internal class EmbeddedLyricsProvider : LyricsProvider() {
     override fun enabled(settings: LyricsSettings) = settings.embedded
@@ -114,8 +122,8 @@ internal class EmbeddedLyricsProvider : LyricsProvider() {
 /**
  * Reads lyrics from a sibling file next to the audio file: `<basename>.lrc` (checked
  * first, since it's usually LRC-timestamped synced text) then `<basename>.txt`.
- * Always local, so it runs alongside the embedded-tag provider ahead of any external
- * fetch.
+ * Always local, so it is tried right after the embedded-tag provider, ahead of any
+ * external fetch.
  */
 internal class SidecarLyricsProvider : LyricsProvider() {
     override fun enabled(settings: LyricsSettings) = settings.sidecar
@@ -302,16 +310,20 @@ private suspend fun request(base: String, params: Map<String, String>): String? 
                 )
             }=${URLEncoder.encode(it.value, "UTF-8")}"
         }
-        (URL("$base?$query").openConnection() as HttpURLConnection).run {
-            try {
-                connectTimeout = 30_000; readTimeout = 30_000; setRequestProperty(
-                    "User-Agent",
-                    "Airmedy-Android/${BuildConfig.VERSION_NAME}"
-                ); if (responseCode !in 200..299) null else inputStream.bufferedReader()
-                    .use { it.readText() }
-            } finally {
-                disconnect()
+        val connection = (URL("$base?$query").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000; readTimeout = 10_000
+            setRequestProperty("User-Agent", "Airmedy-Android/${BuildConfig.VERSION_NAME}")
+        }
+        // HttpURLConnection ignores thread interrupts, so a cancelled caller would stay
+        // blocked until the timeout. Disconnecting from the cancelling thread makes the
+        // blocked connect/read throw at once.
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { connection.disconnect() }
+            val body = runCatching {
+                connection.run { if (responseCode !in 200..299) null else inputStream.bufferedReader().use { it.readText() } }
             }
+            connection.disconnect()
+            continuation.resumeWith(body)
         }
     }
 
