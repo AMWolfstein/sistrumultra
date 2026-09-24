@@ -46,6 +46,20 @@ class TrackInfoContentTest {
     }
 
     @Test
+    fun mp3StoredAsMpegIsLossy() {
+        // The scanner derives the format from the MIME type, so MP3 arrives as "mpeg".
+        assertEquals(TrackAudioQuality.Lossy, trackAudioQuality(track("""{"format":"mpeg","codec":"mpeg","bitrate":320000,"sample_rate":44100}""")))
+    }
+
+    @Test
+    fun flacInsideAnMp4ContainerIsLossless() {
+        assertEquals(TrackAudioQuality.Lossless, trackAudioQuality(track("""{"format":"mp4","codec":"flac","bit_depth":16,"sample_rate":44100}""")))
+        assertEquals(TrackAudioQuality.HiRes, trackAudioQuality(track("""{"format":"mp4","codec":"flac","bit_depth":24,"sample_rate":96000}""")))
+        assertEquals(TrackAudioQuality.Lossless, trackAudioQuality(track("""{"format":"m4a","codec":"flac","bit_depth":16,"sample_rate":44100}""")))
+        assertEquals(TrackAudioQuality.Lossy, trackAudioQuality(track("""{"format":"mp4","codec":"mp4a-latm"}""")))
+    }
+
+    @Test
     fun qualityBadgeColorsMatchTheDesktopPalette() {
         val lossy = requireNotNull(trackQualityBadgeStyle(TrackAudioQuality.Lossy, colors))
         assertEquals(colors.textMain.copy(alpha = 0.50f), lossy.foreground)
