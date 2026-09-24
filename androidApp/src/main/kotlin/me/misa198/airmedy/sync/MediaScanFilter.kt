@@ -26,9 +26,20 @@ internal data class MediaScanFilter(
         val normalized = path.lowercase()
         return when (mode) {
             MediaScanMode.Whitelist ->
-                whitelistedFolders.isNotEmpty() && whitelistedFolders.any { normalized.startsWith(it.lowercase()) }
+                whitelistedFolders.isNotEmpty() && whitelistedFolders.any { normalized.isInFolder(it) }
             MediaScanMode.Blacklist ->
-                blacklistedFolders.isEmpty() || blacklistedFolders.none { normalized.startsWith(it.lowercase()) }
+                blacklistedFolders.isEmpty() || blacklistedFolders.none { normalized.isInFolder(it) }
         }
     }
+}
+
+/**
+ * True when this (lowercased) path is [folder] itself or lies under it. A plain prefix
+ * check would also match sibling folders sharing the prefix (".../Music" matching
+ * ".../MusicVideos"). The picker stores the storage root with a trailing slash
+ * ("/storage/emulated/0/"), so that is trimmed before appending the separator.
+ */
+private fun String.isInFolder(folder: String): Boolean {
+    val prefix = folder.lowercase().trimEnd('/')
+    return this == prefix || startsWith("$prefix/")
 }
