@@ -61,7 +61,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import me.misa198.airmedy.R
 import me.misa198.airmedy.ui.theme.LocalAirmedyColors
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.transformLatest
 import kotlin.math.roundToInt
 
 internal data class PlayerLyricLine(
@@ -135,8 +140,36 @@ internal fun displayedLyricsPositionMs(playbackPositionMs: Long, pendingSeekPosi
 internal fun shouldEnterLyricsBrowseMode(isUserDragging: Boolean, isFollowingSelectedLine: Boolean = false): Boolean =
     isUserDragging && !isFollowingSelectedLine
 
+/** How long manual browsing may sit idle before the lyrics glide back to the current line. */
+internal const val LyricsBrowseIdleTimeoutMs = 4_000L
+
+/**
+ * Returns once [scrolling] has stayed false for [idleMillis]. Any new scroll activity
+ * restarts the countdown, so browsing only ends after a genuine pause.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal suspend fun awaitLyricsBrowseIdle(scrolling: Flow<Boolean>, idleMillis: Long = LyricsBrowseIdleTimeoutMs) {
+    scrolling.distinctUntilChanged()
+        .transformLatest { active -> if (!active) { delay(idleMillis); emit(Unit) } }
+        .first()
+}
+
 /** Small finger drift on a lyric row is still a seek, not a manual browse. */
 internal fun shouldSeekFromLyricTap(dragDistancePx: Float, tapSlopPx: Float): Boolean = dragDistancePx <= tapSlopPx
+
+/**
+ * Line opacity by distance from the current line. While browsing, other lines are
+ * brightened to stay readable but kept below the current line, so it can still be found.
+ */
+internal fun syncedLyricOpacity(distance: Int, focusMode: Boolean): Float = when {
+    distance == 0 -> 1f
+    !focusMode -> BrowseLyricOpacity
+    distance == 1 -> 0.25f
+    distance == 2 -> 0.15f
+    else -> 0.10f
+}
+
+internal const val BrowseLyricOpacity = 0.55f
 
 internal fun syncedLyricBlurRadius(distance: Int) = when (distance) {
     0 -> 0.dp
@@ -238,6 +271,7 @@ private fun SyncedLyricsList(
     var selectedLineAnimationComplete by remember(lines) { mutableStateOf(false) }
     var isFollowingSelectedLine by remember(lines) { mutableStateOf(false) }
     var returnedToForeground by remember(lines) { mutableStateOf(false) }
+    var returningFromBrowse by remember(lines) { mutableStateOf(false) }
     var previousPositionMs by remember(trackId) { mutableLongStateOf(currentPositionMs) }
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     val displayedPositionMs = displayedLyricsPositionMs(currentPositionMs, pendingSeekPositionMs)
@@ -274,6 +308,13 @@ private fun SyncedLyricsList(
     }
     LaunchedEffect(isUserDragging, isFollowingSelectedLine) {
         if (shouldEnterLyricsBrowseMode(isUserDragging, isFollowingSelectedLine)) isBrowsing = true
+    }
+    LaunchedEffect(isBrowsing) {
+        if (!isBrowsing) return@LaunchedEffect
+        // A fling keeps scrolling after the finger lifts; count idle time from when it stops.
+        awaitLyricsBrowseIdle(snapshotFlow { isUserDragging || listState.isScrollInProgress })
+        returningFromBrowse = true
+        isBrowsing = false
     }
     suspend fun previousLineOffset(activeLineIndex: Int): Int {
         val previousIndex = (activeLineIndex - 1).coerceAtLeast(0)
@@ -374,7 +415,12 @@ private fun SyncedLyricsList(
     }
     LaunchedEffect(lines, activeIndex, isBrowsing, selectedLineIndex, returnedToForeground) {
         if (activeIndex < 0 || isBrowsing || selectedLineIndex != null) return@LaunchedEffect
-        if (!hasPositionedInitialLine) {
+        if (returningFromBrowse) {
+            // The browsed-to position is usually far from the current line, which the
+            // regular follower below ignores, so glide back explicitly.
+            returningFromBrowse = false
+            animateToActiveLine(activeIndex)
+        } else if (!hasPositionedInitialLine) {
             positionInitialLine(activeIndex)
             hasPositionedInitialLine = true
             returnedToForeground = false
@@ -428,22 +474,15 @@ private fun SyncedLyricRow(
     // recompositions. Read the newest callback when a tap finishes so it
     // cannot dispatch through the callback captured for an earlier track.
     val latestOnClick = rememberUpdatedState(onClick)
-    val targetOpacity = if (!focusMode) {
-        1f
-    } else when (distance) {
-        0 -> 1f
-        1 -> 0.25f
-        2 -> 0.15f
-        else -> 0.10f
-    }
+    val targetOpacity = syncedLyricOpacity(distance, focusMode)
     val targetBlur = if (focusMode) syncedLyricBlurRadius(distance) else 0.dp
     val opacity by animateFloatAsState(targetOpacity, tween(300, easing = FastOutSlowInEasing), label = "synced-lyric-opacity")
     val animatedBlur by animateDpAsState(targetBlur, tween(300, easing = FastOutSlowInEasing), label = "synced-lyric-blur")
-    val scale by animateFloatAsState(if (focusMode && distance == 0) 1.04f else 1f, tween(300, easing = FastOutSlowInEasing), label = "synced-lyric-scale")
+    val scale by animateFloatAsState(if (distance == 0) 1.04f else 1f, tween(300, easing = FastOutSlowInEasing), label = "synced-lyric-scale")
     val activeOffsetPx = with(LocalDensity.current) { 4.dp.toPx() }
     val lyricTapSlopPx = with(LocalDensity.current) { 20.dp.toPx() }
     val animatedTranslationY by animateFloatAsState(
-        if (focusMode && distance == 0) -activeOffsetPx else 0f,
+        if (distance == 0) -activeOffsetPx else 0f,
         tween(300, easing = FastOutSlowInEasing),
         label = "synced-lyric-offset",
     )
