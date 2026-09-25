@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -65,9 +67,9 @@ import me.misa198.airmedy.ui.theme.LocalAirmedyColors
 private data class DelimiterPreset(val nameRes: Int, val tokens: List<String>)
 private data class BaseDelimiter(val token: String, val nameRes: Int)
 
-// Standard is Rhythm's own default; this fork's default (with the Arabic comma) is the
-// Arabic preset, so the two stay distinct.
+// "All" is this fork's default (every delimiter below); Standard is Rhythm's own default.
 private val Presets = listOf(
+    DelimiterPreset(R.string.tag_separators_preset_all, ArtistSeparator.DEFAULT_TOKENS),
     DelimiterPreset(R.string.tag_separators_preset_standard, listOf(";", "/")),
     DelimiterPreset(R.string.tag_separators_preset_minimal, listOf(";")),
     DelimiterPreset(R.string.tag_separators_preset_featured, listOf(";", "/", "feat.", "ft.", "featuring")),
@@ -135,11 +137,14 @@ internal fun TagSeparatorsContent(modifier: Modifier = Modifier) {
                             ActionListItem(
                                 R.string.tag_separators_delimiters,
                                 trailingContent = {
+                                    // Capped so a long list can't squeeze the row label.
                                     Text(
                                         text = current.delimiters.joinToString("  "),
+                                        modifier = Modifier.widthIn(max = 150.dp),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = colors.textMuted,
                                         maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 },
                                 onClick = { showSheet = true },

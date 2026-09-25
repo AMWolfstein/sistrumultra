@@ -5,7 +5,8 @@
  *
  * Ported from Rhythm's ArtistSeparator (https://github.com/cromaguy/Rhythm,
  * app/src/main/java/chromahub/rhythm/app/util/ArtistSeparator.kt). Changes: the default
- * delimiters add the Arabic comma, the JSON format uses kotlinx.serialization instead of
+ * delimiters are every token Rhythm's UI offers plus the Arabic comma (Rhythm defaults to
+ * ";" and "/"), the JSON format uses kotlinx.serialization instead of
  * Gson, a "|" token is always stored as JSON (the compact form mis-parsed it), and the
  * display helpers (getPrimaryArtist, formatArtists, escapeArtistName) are not ported
  * because nothing in this app uses them.
@@ -28,15 +29,25 @@ import kotlinx.serialization.json.Json
  * - "Artist1 (feat. Artist2)" -> ["Artist1", "Artist2"] (with "feat." enabled)
  */
 internal object ArtistSeparator {
-    /** ";", "/" and the Arabic comma "،" (U+060C), which Arabic tags use between artists. */
-    val DEFAULT_TOKENS: List<String> = listOf(";", "/", "،")
-    const val DEFAULT_DELIMITERS = ";/،"
+    /**
+     * Every delimiter Rhythm's UI offers, plus the Arabic comma "،" (U+060C) that Arabic tags
+     * use between artists. Deliberately broad: it also splits names that contain one of
+     * these ("Simon & Garfunkel", "Tyler, The Creator"); a backslash escape keeps those.
+     */
+    val DEFAULT_TOKENS: List<String> = listOf(
+        ";", "/", ",", "\u060C", "+", "&",
+        "feat.", "ft.", "featuring", "x", "with", "vs.",
+        "、", "／", "・", "•",
+    )
     private const val ESCAPE_CHAR = '\\'
     private const val PLACEHOLDER_PREFIX = "\u0000\u0001"
     private const val PLACEHOLDER_SUFFIX = '\u0002'
 
     private val json = Json
     private val tokenListSerializer = ListSerializer(String.serializer())
+
+    /** [DEFAULT_TOKENS] in stored form (a JSON array, since it includes words). */
+    val DEFAULT_DELIMITERS: String = json.encodeToString(tokenListSerializer, DEFAULT_TOKENS)
     private val regexCache = ConcurrentHashMap<String, Regex>()
 
     /**

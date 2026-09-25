@@ -191,24 +191,46 @@ class ArtistSeparatorTest {
     // --- This fork's additions ---
 
     @Test
-    fun defaults_includeTheArabicComma() {
-        assertEquals(listOf(";", "/", "،"), ArtistSeparator.DEFAULT_TOKENS)
+    fun defaults_areEveryOfferedDelimiterPlusTheArabicComma() {
+        assertEquals(
+            listOf(";", "/", ",", "\u060C", "+", "&", "feat.", "ft.", "featuring", "x", "with", "vs.", "、", "／", "・", "•"),
+            ArtistSeparator.DEFAULT_TOKENS,
+        )
         assertEquals(ArtistSeparator.DEFAULT_TOKENS, ArtistSeparator.parseDelimiters(null))
         assertEquals(ArtistSeparator.DEFAULT_TOKENS, ArtistSeparator.parseDelimiters("  "))
+        // Stored as JSON (it includes words); non-ASCII tokens survive the round trip.
         assertEquals(ArtistSeparator.DEFAULT_TOKENS, ArtistSeparator.parseDelimiters(ArtistSeparator.DEFAULT_DELIMITERS))
+        assertEquals(ArtistSeparator.DEFAULT_DELIMITERS, ArtistSeparator.serializeDelimiters(emptyList()))
     }
 
     @Test
-    fun arabicComma_roundTripsInTheCompactFormAndSplits() {
-        val serialized = ArtistSeparator.serializeDelimiters(ArtistSeparator.DEFAULT_TOKENS)
-        assertEquals(";/،", serialized)
-        assertEquals(ArtistSeparator.DEFAULT_TOKENS, ArtistSeparator.parseDelimiters(serialized))
-        assertEquals(
-            listOf("عمرو دياب", "تامر حسني"),
-            ArtistSeparator.splitArtistNames("عمرو دياب، تامر حسني", ArtistSeparator.DEFAULT_TOKENS, true),
-        )
-        // The Latin comma is a different character and is not a default delimiter.
-        assertEquals(listOf("Amr Diab, R3HAB"), ArtistSeparator.splitArtistNames("Amr Diab, R3HAB", ArtistSeparator.DEFAULT_TOKENS, true))
+    fun defaults_splitSymbolsWordsAndWideDelimiters() {
+        val defaults = ArtistSeparator.DEFAULT_TOKENS
+        assertEquals(listOf("Amr Diab", "R3HAB"), ArtistSeparator.splitArtistNames("Amr Diab, R3HAB", defaults, true))
+        assertEquals(listOf("عمرو دياب", "تامر حسني"), ArtistSeparator.splitArtistNames("عمرو دياب\u060C تامر حسني", defaults, true))
+        assertEquals(listOf("A", "B", "C"), ArtistSeparator.splitArtistNames("A x B vs. C", defaults, true))
+        assertEquals(listOf("A", "B"), ArtistSeparator.splitArtistNames("A (featuring B)", defaults, true))
+        assertEquals(listOf("YOASOBI", "Ayase"), ArtistSeparator.splitArtistNames("YOASOBI、Ayase", defaults, true))
+        // Word tokens still only match whole words.
+        assertEquals(listOf("Phoenix"), ArtistSeparator.splitArtistNames("Phoenix", defaults, true))
+        assertEquals(listOf("Within Temptation"), ArtistSeparator.splitArtistNames("Within Temptation", defaults, true))
+    }
+
+    @Test
+    fun defaults_splitNamesContainingADelimiterUnlessEscaped() {
+        // The accepted cost of the broad default set.
+        val defaults = ArtistSeparator.DEFAULT_TOKENS
+        assertEquals(listOf("Simon", "Garfunkel"), ArtistSeparator.splitArtistNames("Simon & Garfunkel", defaults, true))
+        assertEquals(listOf("Tyler", "The Creator"), ArtistSeparator.splitArtistNames("Tyler, The Creator", defaults, true))
+        assertEquals(listOf("Simon & Garfunkel"), ArtistSeparator.splitArtistNames("Simon \\& Garfunkel", defaults, true))
+    }
+
+    @Test
+    fun arabicComma_roundTripsInTheCompactForm() {
+        val tokens = listOf(";", "/", "\u060C")
+        val serialized = ArtistSeparator.serializeDelimiters(tokens)
+        assertEquals(";/\u060C", serialized)
+        assertEquals(tokens, ArtistSeparator.parseDelimiters(serialized))
     }
 
     @Test

@@ -79,6 +79,7 @@
     <string name="tag_separators_about_title">About tag separators</string>
     <string name="tag_separators_about">Tags like “Artist A/Artist B” are split into separate artists or composers on the delimiters you choose. Word delimiters such as “feat.” only match whole words, so “ft.” never splits “Daft Punk”. Put a backslash before a delimiter to keep it: “AC\\/DC” stays one artist. Changes apply the next time the library is scanned.</string>
     <string name="tag_separators_presets">Presets</string>
+    <string name="tag_separators_preset_all">All (default)</string>
     <string name="tag_separators_preset_standard">Standard</string>
     <string name="tag_separators_preset_minimal">Minimal</string>
     <string name="tag_separators_preset_featured">Featured &amp; collabs</string>

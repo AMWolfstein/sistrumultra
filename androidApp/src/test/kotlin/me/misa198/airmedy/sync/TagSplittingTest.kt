@@ -12,17 +12,21 @@ class TagSplittingTest {
 
     private val defaults = TagSeparatorSettings()
 
-    @Test fun `default separators split on semicolon, slash and the Arabic comma`() {
+    @Test fun `default separators split every offered delimiter`() {
         assertEquals(
             listOf("A", "B", "C", "عمرو دياب", "تامر حسني"),
             localArtistsOf("A; B/C، عمرو دياب، تامر حسني", defaults).map { it.name },
         )
-        assertEquals(listOf("Amr Diab, R3HAB"), localArtistsOf("Amr Diab, R3HAB", defaults).map { it.name })
+        assertEquals(listOf("Amr Diab", "R3HAB"), localArtistsOf("Amr Diab, R3HAB", defaults).map { it.name })
+        assertEquals(
+            listOf("Skylar Grey", "Polo G", "Mozzy", "Eminem"),
+            localArtistsOf("Skylar Grey, Polo G, Mozzy & Eminem", defaults).map { it.name },
+        )
     }
 
     @Test fun `configured delimiters change what the scanner extracts`() {
-        val withComma = TagSeparatorSettings(delimiters = listOf(";", ","))
-        assertEquals(listOf("Amr Diab", "R3HAB"), localArtistsOf("Amr Diab, R3HAB", withComma).map { it.name })
+        val semicolonOnly = TagSeparatorSettings(delimiters = listOf(";"))
+        assertEquals(listOf("Amr Diab, R3HAB"), localArtistsOf("Amr Diab, R3HAB", semicolonOnly).map { it.name })
 
         val featured = TagSeparatorSettings(delimiters = listOf("feat."))
         assertEquals(listOf("Daft Punk", "Pharrell Williams"), localArtistsOf("Daft Punk feat. Pharrell Williams", featured).map { it.name })
@@ -35,9 +39,15 @@ class TagSplittingTest {
     }
 
     @Test fun `composers share the artist separators`() {
-        assertEquals(listOf("Mostafa Elassal & Amr Tayam", "Ahmed"), localComposersOf("Mostafa Elassal & Amr Tayam; Ahmed", defaults).map { it.name })
-        val withAmpersand = TagSeparatorSettings(delimiters = listOf(";", "&"))
-        assertEquals(listOf("Mostafa Elassal", "Amr Tayam", "Ahmed"), localComposersOf("Mostafa Elassal & Amr Tayam; Ahmed", withAmpersand).map { it.name })
+        assertEquals(
+            listOf("Mostafa Elassal", "Amr Tayam", "Ahmed"),
+            localComposersOf("Mostafa Elassal & Amr Tayam; Ahmed", defaults).map { it.name },
+        )
+        val semicolonOnly = TagSeparatorSettings(delimiters = listOf(";"))
+        assertEquals(
+            listOf("Mostafa Elassal & Amr Tayam", "Ahmed"),
+            localComposersOf("Mostafa Elassal & Amr Tayam; Ahmed", semicolonOnly).map { it.name },
+        )
     }
 
     @Test fun `ids are built per name after splitting, with diacritics folded`() {
@@ -59,7 +69,7 @@ class TagSplittingTest {
 
     @Test fun `the settings signature changes with the delimiters and the switch`() {
         val base = TagSeparatorSettings()
-        assertEquals(base.signature, TagSeparatorSettings(delimiters = listOf(";", "/", "،")).signature)
+        assertEquals(base.signature, TagSeparatorSettings(delimiters = ArtistSeparator.DEFAULT_TOKENS.toList()).signature)
         assert(base.signature != TagSeparatorSettings(delimiters = listOf(";")).signature)
         assert(base.signature != TagSeparatorSettings(enabled = false).signature)
     }
