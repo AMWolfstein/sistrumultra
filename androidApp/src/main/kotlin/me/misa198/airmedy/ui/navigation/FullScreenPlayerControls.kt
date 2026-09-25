@@ -168,6 +168,7 @@ internal fun FullScreenPlayerControls(
     val queueIcon by animateColorAsState(if (queueSelected) colors.playerBackdrop.copy(alpha = 0.72f) else colors.foregroundSubtle, tween(QueueButtonSelectionTransitionDurationMs, easing = FastOutSlowInEasing), label = "full-screen-queue-button-icon")
     val qualityBadge = contextTrack?.let(::trackAudioQuality)?.let {
         when (it) {
+            TrackAudioQuality.Lossy -> R.string.track_info_quality_lossy to MaterialSymbols.MusicNote
             TrackAudioQuality.Lossless -> R.string.track_info_quality_lossless to MaterialSymbols.GraphicEq
             TrackAudioQuality.HiRes -> R.string.track_info_quality_hi_res to MaterialSymbols.Bolt
             TrackAudioQuality.Dsd -> R.string.track_info_quality_dsd to MaterialSymbols.Crown

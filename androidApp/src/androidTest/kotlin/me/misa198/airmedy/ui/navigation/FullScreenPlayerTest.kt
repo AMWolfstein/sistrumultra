@@ -128,6 +128,23 @@ class FullScreenPlayerTest {
         composeTestRule.runOnIdle {
             track = track.copy(metadataJson = "{\"format\":\"mp3\"}")
         }
+        composeTestRule.onNodeWithTag(FullScreenPlayerQualityBadgeTestTag).assertExists()
+        composeTestRule.onNodeWithText("Lossy").assertExists()
+        assertEquals(
+            elapsedTimeBounds.left,
+            composeTestRule.onNodeWithTag(FullScreenPlayerElapsedTimeTestTag).fetchSemanticsNode().boundsInRoot.left,
+            0.5f,
+        )
+        assertEquals(
+            durationBounds.right,
+            composeTestRule.onNodeWithTag(FullScreenPlayerDurationTestTag).fetchSemanticsNode().boundsInRoot.right,
+            0.5f,
+        )
+
+        composeTestRule.runOnIdle {
+            track = track.copy(metadataJson = "{\"format\":\"m4a\"}")
+        }
+        // Unknown quality (MP4 whose codec wasn't read) still has no badge, as in Track Info.
         composeTestRule.onAllNodesWithTag(FullScreenPlayerQualityBadgeTestTag).assertCountEquals(0)
         assertEquals(
             elapsedTimeBounds.left,
