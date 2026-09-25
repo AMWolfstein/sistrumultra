@@ -126,6 +126,7 @@ internal class MediaStoreLibraryScanner(
             val columns = (BaseProjection + AudioFormatColumns).associateWith { name -> cursor.getColumnIndex(name) }
             fun text(name: String): String? = columns[name]?.takeIf { it >= 0 }?.let(cursor::getString)?.trim()
             fun number(name: String): Long? = columns[name]?.takeIf { it >= 0 }?.let(cursor::getLong)
+            fun tag(name: String): String? = mediaStoreTagValue(text(name))
 
             while (cursor.moveToNext()) {
                 val mediaId = number(ColumnId) ?: continue
@@ -134,9 +135,9 @@ internal class MediaStoreLibraryScanner(
                 val title = text(ColumnTitle) ?: ""
                 if (title.isBlank()) continue
                 val trackId = "local:$mediaId"
-                val artistName = text(ColumnArtist) ?: ""
-                val albumArtistName = text(ColumnAlbumArtist)?.takeIf(String::isNotBlank) ?: artistName
-                val albumName = text(ColumnAlbum) ?: ""
+                val artistName = tag(ColumnArtist) ?: ""
+                val albumArtistName = tag(ColumnAlbumArtist) ?: artistName
+                val albumName = tag(ColumnAlbum) ?: ""
                 val key = albumKey(number(ColumnAlbumId), albumArtistName, albumName)
                 val artworkKey = albumArtworkKey(key)
                 val dateAdded = number(ColumnDateAdded) ?: 0L
@@ -197,7 +198,7 @@ internal class MediaStoreLibraryScanner(
                         createdAt = isoDate(dateAdded),
                     ),
                     albumArtists = artistsOf(albumArtistName),
-                    composers = composersOf(text(ColumnComposer) ?: ""),
+                    composers = composersOf(tag(ColumnComposer) ?: ""),
                     genres = genresByTrack[mediaId].orEmpty().mapNotNull { raw ->
                         raw.trim().takeIf(String::isNotEmpty)?.let { LocalGenre(genreId(it), it) }
                     },
@@ -473,6 +474,15 @@ internal class MediaStoreLibraryScanner(
         val ArtworkTargetSize = Size(1024, 1024)
     }
 }
+
+/**
+ * A MediaStore tag column's value, or null when the file has no such tag. MediaStore
+ * reports a missing artist as the literal "<unknown>" (MediaStore.UNKNOWN_STRING), which
+ * would otherwise be shown and even listed as an artist; missing values are left blank
+ * so the app's own "Unknown artist" fallback applies.
+ */
+internal fun mediaStoreTagValue(value: String?): String? =
+    value?.trim()?.takeUnless { it.isEmpty() || it == MediaStore.UNKNOWN_STRING }
 
 /**
  * Canonical format name ("mp3", "wav", "aiff", "m4a", ...) for a MediaStore MIME type.
