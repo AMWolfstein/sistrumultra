@@ -43,6 +43,15 @@ class ListeningRetentionTest {
         filesDir.deleteRecursively()
     }
 
+    private fun ids(table: String, where: String = "1"): Set<String> = database.openHelper.readableDatabase
+        .query("SELECT id FROM $table WHERE $where").use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    private fun dailyRows(): List<String> = listOf("daily_track_listening_stats", "daily_playback_attempt_stats").flatMap { table ->
+        database.openHelper.readableDatabase.query("SELECT * FROM $table").use { cursor ->
+            buildList { while (cursor.moveToNext()) add((0 until cursor.columnCount).joinToString("|") { cursor.getString(it) }) }
+        }
+    }
+
     private suspend fun session(id: String, endedAt: Long) = store.recordListening(
         ListeningWrite.Session(ListeningSession(id, "device", "t-$id", endedAt - 60_000, endedAt, 60, qualifiedPlay = true)),
     )
@@ -62,17 +71,14 @@ class ListeningRetentionTest {
         attempt("old-finished", startedAt = before - 60_000, endedAt = before)
         attempt("new-finished", startedAt = after - 60_000, endedAt = after)
         attempt("open", startedAt = before - 60_000, endedAt = null)
-        val dailyBefore = store.listeningSnapshot("r", 0).let { it.dailyTracks to it.dailyAttempts }
-        assertTrue("the writes produced daily aggregates", dailyBefore.first.isNotEmpty() && dailyBefore.second.isNotEmpty())
+        val dailyBefore = dailyRows()
+        assertTrue("the writes produced daily aggregates", dailyBefore.isNotEmpty())
 
         store.cleanupListening(cutoff)
 
-        val snapshot = store.listeningSnapshot("r", 0)
-        assertEquals("sessions ending at or after the cutoff are kept", setOf("edge", "new"), snapshot.sessions.map { it.id }.toSet())
-        assertEquals("finished attempts before the cutoff are deleted", setOf("new-finished"), snapshot.attempts.map { it.id }.toSet())
-        // The snapshot lists finished attempts only; an unfinished one must survive for
-        // recoverOpenPlaybackAttempts to close it.
-        assertEquals(listOf("open"), database.syncDao().openPlaybackAttempts().map { it.id })
-        assertEquals("daily aggregates are kept for all-time totals", dailyBefore, snapshot.dailyTracks to snapshot.dailyAttempts)
+        assertEquals("sessions ending at or after the cutoff are kept", setOf("edge", "new"), ids("listening_sessions"))
+        assertEquals("finished attempts before the cutoff are deleted", setOf("new-finished"), ids("playback_attempts", "endedAt > 0"))
+        assertEquals("an unfinished attempt survives for recoverOpenPlaybackAttempts", setOf("open"), ids("playback_attempts", "endedAt = 0"))
+        assertEquals("daily aggregates are kept for all-time totals", dailyBefore, dailyRows())
     }
 }
