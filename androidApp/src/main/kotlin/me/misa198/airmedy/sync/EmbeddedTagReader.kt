@@ -23,8 +23,9 @@ import java.io.RandomAccessFile
  * - MP3 ID3v2.2/2.3/2.4: `APIC`/`PIC` artwork and `USLT`/`ULT` lyrics frames. The
  *   tag is read at the size its header declares, not as a fixed prefix.
  * - WAV (`RIFF`/`WAVE`) and AIFF (`FORM`/`AIFF`|`AIFC`): `id3 `/`ID3 `
- *   chunks carrying an embedded ID3v2 tag; WAV files with a tag prepended
- *   directly to the file are handled by the ID3 branch.
+ *   chunks carrying an embedded ID3v2 tag, found wherever it sits by walking the
+ *   chunk headers; WAV files with a tag prepended directly to the file are handled
+ *   by the ID3 branch.
  *
  * Only a bounded prefix of each file is read (tags live at the file head).
  */
@@ -86,6 +87,7 @@ internal object EmbeddedTagReader {
     private val VorbisIdMagic = byteArrayOf(0x01) + "vorbis".toByteArray(Charsets.US_ASCII)
     private val VorbisCommentMagic = byteArrayOf(0x03) + "vorbis".toByteArray(Charsets.US_ASCII)
     private const val Mp4ReadLimit = 24 * 1024 * 1024
+    /** Guard against a corrupt ID3 size field inside a WAV/AIFF chunk. */
     private const val RiffReadLimit = 24 * 1024 * 1024
     private const val MagicReadLimit = 32 * 1024
 
@@ -97,7 +99,7 @@ internal object EmbeddedTagReader {
             head.isId3() -> id3Apic(readId3Tag(path) ?: return null)
             head.isOgg() -> oggPicture(path)
             head.isMp4() -> mp4Covr(readPrefix(path, Mp4ReadLimit) ?: return null)
-            head.isRiff() || head.isForm() -> riffId3Picture(readPrefix(path, RiffReadLimit) ?: return null)
+            head.isRiff() || head.isForm() -> riffId3Picture(path)
             else -> null
         }
     }.getOrNull()
@@ -112,7 +114,7 @@ internal object EmbeddedTagReader {
                 head.isFlac() -> flacVorbisLyrics(readPrefix(path, FlacReadLimit) ?: return null)
                 head.isOgg() -> oggVorbisLyrics(path)
                 head.isMp4() -> mp4Lyrics(readPrefix(path, Mp4ReadLimit) ?: return null)
-                head.isRiff() || head.isForm() -> riffId3Lyrics(readPrefix(path, RiffReadLimit) ?: return null)
+                head.isRiff() || head.isForm() -> riffId3Lyrics(path)
                 else -> null
             }
         }
@@ -128,7 +130,7 @@ internal object EmbeddedTagReader {
                 head.isFlac() -> flacExtractedTags(readPrefix(path, FlacReadLimit) ?: return null)
                 head.isOgg() -> oggExtractedTags(path)
                 head.isMp4() -> mp4ExtractedTags(readPrefix(path, Mp4ReadLimit) ?: return null)
-                head.isRiff() || head.isForm() -> riffExtractedTags(readPrefix(path, RiffReadLimit) ?: return null)
+                head.isRiff() || head.isForm() -> riffExtractedTags(path)
                 else -> null
             }
         }
@@ -668,32 +670,47 @@ internal object EmbeddedTagReader {
 
     // ---------------------------------------------------------------- RIFF / AIFF
 
-    /** Embedded ID3v2 tag carried by a WAV `id3 ` or AIFF `ID3 ` chunk, or null. */
-    private fun riffId3Tag(bytes: ByteArray): ByteArray? = runCatching {
-        if (bytes.size < 12) return@runCatching null
-        val bigEndian = bytes.isForm() // AIFF is big-endian; WAV is little-endian.
-        var pos = 12
-        while (pos + 8 <= bytes.size) {
-            val chunkSize = if (bigEndian) bytes.readUInt32BE(pos + 4) else bytes.readUInt32LE(pos + 4)
-            val id = String(bytes, pos, 4, Charsets.ISO_8859_1)
+    /**
+     * Embedded ID3v2 tag carried by a WAV `id3 ` or AIFF `ID3 ` chunk, or null. The
+     * chunk usually follows the audio `data`/`SSND` chunk, so chunk headers are walked
+     * by seeking past each body; only the ID3 tag itself is read, at its declared size.
+     */
+    private fun readRiffId3Tag(path: String): ByteArray? = RandomAccessFile(path, "r").use { file ->
+        val length = file.length()
+        val header = ByteArray(12)
+        if (length < 12L) return null
+        file.readFully(header)
+        val bigEndian = header.isForm() // AIFF is big-endian; WAV is little-endian.
+        var pos = 12L
+        while (pos + 8 <= length) {
+            file.seek(pos)
+            file.readFully(header, 0, 8)
+            val chunkSize = (if (bigEndian) header.readUInt32BE(4) else header.readUInt32LE(4)).toLong() and 0xFFFFFFFFL
             val payloadStart = pos + 8
             val chunkEnd = payloadStart + chunkSize
-            if (chunkEnd > bytes.size) break
-            if (id.equals("id3 ", ignoreCase = true) || id.equals("ID3 ", ignoreCase = true)) {
-                val candidate = bytes.copyOfRange(payloadStart, chunkEnd)
-                if (candidate.isId3()) return@runCatching candidate
+            if (chunkEnd > length) return null
+            val id = String(header, 0, 4, Charsets.ISO_8859_1)
+            if (id.equals("id3 ", ignoreCase = true) && chunkSize >= 10) {
+                file.readFully(header, 0, 10)
+                val tagSize = id3TagSize(header)
+                if (tagSize != null) {
+                    val tag = ByteArray(minOf(tagSize, chunkSize, RiffReadLimit.toLong()).toInt())
+                    file.seek(payloadStart)
+                    file.readFully(tag)
+                    return tag
+                }
             }
             // RIFF chunks are word-aligned.
-            pos = chunkEnd + (chunkSize and 1)
+            pos = chunkEnd + (chunkSize and 1L)
         }
         null
-    }.getOrNull()
+    }
 
-    private fun riffId3Picture(bytes: ByteArray): ByteArray? = riffId3Tag(bytes)?.let { id3Apic(it) }
+    private fun riffId3Picture(path: String): ByteArray? = readRiffId3Tag(path)?.let { id3Apic(it) }
 
-    private fun riffId3Lyrics(bytes: ByteArray): String? = riffId3Tag(bytes)?.let { id3Uslt(it) }
+    private fun riffId3Lyrics(path: String): String? = readRiffId3Tag(path)?.let { id3Uslt(it) }
 
-    private fun riffExtractedTags(bytes: ByteArray): EmbeddedTrackTags? = riffId3Tag(bytes)?.let { id3ExtractedTags(it) }
+    private fun riffExtractedTags(path: String): EmbeddedTrackTags? = readRiffId3Tag(path)?.let { id3ExtractedTags(it) }
 
     // ---------------------------------------------------------------- ID3v2
 

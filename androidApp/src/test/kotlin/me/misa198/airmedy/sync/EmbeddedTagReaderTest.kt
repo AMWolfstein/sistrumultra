@@ -296,6 +296,48 @@ class EmbeddedTagReaderTest {
         assertEquals(true, tags.explicit)
     }
 
+    /** Matches the full-length WAV/AIFF copies on the test device: a 57 MB audio chunk,
+     *  then the `id3 `/`ID3 ` chunk at the end of the file. */
+    private fun riffWithTrailingId3(bigEndian: Boolean, id3Tag: ByteArray): File {
+        val audioSize = 57L * 1024 * 1024
+        val head = ByteArrayOutputStream().apply {
+            write((if (bigEndian) "FORM" else "RIFF").toByteArray(Charsets.ISO_8859_1))
+            if (bigEndian) writeIntBE(0) else writeIntLE(0) // container size is not relied on
+            write((if (bigEndian) "AIFF" else "WAVE").toByteArray(Charsets.ISO_8859_1))
+            write(riffChunk(if (bigEndian) "COMM" else "fmt ", ByteArray(if (bigEndian) 18 else 16), bigEndian))
+            write((if (bigEndian) "SSND" else "data").toByteArray(Charsets.ISO_8859_1))
+            if (bigEndian) writeIntBE(audioSize.toInt()) else writeIntLE(audioSize.toInt())
+        }.toByteArray()
+        val tail = riffChunk(if (bigEndian) "ID3 " else "id3 ", id3Tag, bigEndian)
+        return sparse(if (bigEndian) "aiff-large" else "wav-large", head, audioSize, tail)
+    }
+
+    @Test fun `wav id3 chunk after 57 MB of audio is read`() {
+        val file = riffWithTrailingId3(bigEndian = false, id3v23(frames = tagFrames() + uslt("eng", lrc) + apic(image)))
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals(2002, tags.year)
+        assertEquals("USIR10211570", tags.isrc)
+        assertEquals(true, tags.explicit)
+        assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Second line")
+        assertEquals(image.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    @Test fun `aiff id3 chunk after 57 MB of audio is read`() {
+        val file = riffWithTrailingId3(bigEndian = true, id3v23(frames = tagFrames() + apic(image)))
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals(2002, tags.year)
+        assertEquals(true, tags.explicit)
+        assertEquals(image.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    @Test fun `riff chunk overrunning the file returns null`() {
+        val head = ByteArrayOutputStream().apply {
+            write("RIFF".toByteArray(Charsets.ISO_8859_1)); writeIntLE(0); write("WAVE".toByteArray(Charsets.ISO_8859_1))
+            write("data".toByteArray(Charsets.ISO_8859_1)); writeIntLE(1_000_000)
+        }.toByteArray()
+        assertNull(EmbeddedTagReader.embeddedTrackTags(temp("wav-truncated", head + ByteArray(100)).path))
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")
