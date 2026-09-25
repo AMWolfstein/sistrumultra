@@ -113,8 +113,6 @@ internal fun parsePlayerLyrics(content: String): List<PlayerLyricLine> {
     return lines
 }
 
-internal fun hasSyncedPlayerLyrics(content: String?): Boolean = content != null && parsePlayerLyrics(content).any { it.timestampSeconds != null }
-
 /** Resume automatic following once playback reaches the tapped lyric or passes it. */
 internal fun shouldResumeLyricsAutoScroll(
     selectedLineIndex: Int?,

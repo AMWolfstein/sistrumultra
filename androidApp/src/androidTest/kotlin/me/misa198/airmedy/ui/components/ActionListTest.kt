@@ -30,7 +30,7 @@ class ActionListTest {
                     items = listOf(
                         ActionListItem(
                             labelRes = R.string.library_artists,
-                            leadingSymbol = MaterialSymbols.PlayCircle,
+                            leadingSymbol = MaterialSymbols.PlayArrow,
                             onClick = {},
                         ),
                         ActionListItem(

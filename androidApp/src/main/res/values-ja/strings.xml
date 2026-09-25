@@ -8,9 +8,6 @@
     <string name="destination_library">ライブラリ</string>
     <string name="destination_insight">インサイト</string>
     <string name="destination_settings">設定</string>
-    <string name="placeholder_home">あなたの音楽ホームがここに表示されます。</string>
-    <string name="placeholder_library">あなたのライブラリがここに表示されます。</string>
-    <string name="placeholder_insight">インサイトがここに表示されます。</string>
     <string name="insight_library_section">ライブラリ</string>
     <string name="insight_listening_section">履歴</string>
     <string name="insight_range_7d">7日間</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">ジャンル別リスニング時間グラフ</string>
     <string name="insight_outcomes_description">再生結果グラフ</string>
     <string name="track_info_quality_unknown">不明</string>
-    <string name="placeholder_settings">Airmedyの外観をカスタマイズします。</string>
     <string name="appearance_title">外観</string>
     <string name="appearance_theme_title">テーマ</string>
     <string name="appearance_reduce_transparency">透明度を下げる</string>

@@ -8,9 +8,6 @@
     <string name="destination_library">라이브러리</string>
     <string name="destination_insight">인사이트</string>
     <string name="destination_settings">설정</string>
-    <string name="placeholder_home">음악 홈이 여기에 표시됩니다.</string>
-    <string name="placeholder_library">라이브러리가 여기에 표시됩니다.</string>
-    <string name="placeholder_insight">인사이트가 여기에 표시됩니다.</string>
     <string name="insight_library_section">라이브러리</string>
     <string name="insight_listening_section">기록</string>
     <string name="insight_range_7d">7일</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">장르별 청취 시간 차트</string>
     <string name="insight_outcomes_description">재생 결과 차트</string>
     <string name="track_info_quality_unknown">알 수 없음</string>
-    <string name="placeholder_settings">Airmedy의 모양을 맞춤설정합니다.</string>
     <string name="appearance_title">화면 설정</string>
     <string name="appearance_theme_title">테마</string>
     <string name="appearance_reduce_transparency">투명도 줄이기</string>

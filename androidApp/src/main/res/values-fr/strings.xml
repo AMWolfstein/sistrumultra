@@ -8,9 +8,6 @@
     <string name="destination_library">Bibliothèque</string>
     <string name="destination_insight">Aperçu</string>
     <string name="destination_settings">Paramètres</string>
-    <string name="placeholder_home">Votre accueil musical apparaîtra ici.</string>
-    <string name="placeholder_library">Votre bibliothèque apparaîtra ici.</string>
-    <string name="placeholder_insight">Les aperçus apparaîtront ici.</string>
     <string name="insight_library_section">Bibliothèque</string>
     <string name="insight_listening_section">Historique</string>
     <string name="insight_range_7d">7J</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">Graphique du temps d\'écoute par genre</string>
     <string name="insight_outcomes_description">Graphique des résultats de lecture</string>
     <string name="track_info_quality_unknown">Inconnu</string>
-    <string name="placeholder_settings">Personnalisez l\'apparence d\'Airmedy.</string>
     <string name="appearance_title">Apparence</string>
     <string name="appearance_theme_title">Thème</string>
     <string name="appearance_reduce_transparency">Réduire la transparence</string>

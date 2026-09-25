@@ -466,7 +466,6 @@ private fun FullScreenQueueTrackRow(
 // target, so reordering does not require hitting the icon precisely.
 private val QueueDragHandleWidth = 72.dp
 private val QueuePanelRowHorizontalPadding = 20.dp
-private val QueuePanelRowHeight = 56.dp
 private const val QueuePanelHeaderTestTag = "full_screen_queue_panel_header"
 private const val QueuePanelRowTestTag = "full_screen_queue_row"
 private const val QueuePanelRowContentTestTag = "full_screen_queue_row_content"

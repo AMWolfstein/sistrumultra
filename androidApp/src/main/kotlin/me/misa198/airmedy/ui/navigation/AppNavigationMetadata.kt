@@ -42,14 +42,6 @@ internal val AppDestination.titleRes: Int
         AppDestination.Settings -> R.string.destination_settings
     }
 
-internal val AppDestination.placeholderRes: Int
-    @StringRes get() = when (this) {
-        AppDestination.Home -> R.string.placeholder_home
-        AppDestination.Insight -> R.string.placeholder_insight
-        AppDestination.Library -> R.string.placeholder_library
-        AppDestination.Settings -> R.string.placeholder_settings
-    }
-
 internal val AppDestination.symbol: String
     get() = when (this) {
         AppDestination.Home -> MaterialSymbols.Home

@@ -8,9 +8,6 @@
     <string name="destination_library">Thư viện</string>
     <string name="destination_insight">Thông kê</string>
     <string name="destination_settings">Cài đặt</string>
-    <string name="placeholder_home">Trang chủ nhạc của bạn sẽ hiển thị ở đây.</string>
-    <string name="placeholder_library">Thư viện nhạc của bạn sẽ hiển thị ở đây.</string>
-    <string name="placeholder_insight">Số liệu thống kê sẽ hiển thị ở đây.</string>
     <string name="insight_library_section">Thư viện</string>
     <string name="insight_listening_section">Lịch sử</string>
     <string name="insight_range_7d">7N</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">Biểu đồ thời gian nghe theo thể loại</string>
     <string name="insight_outcomes_description">Biểu đồ kết quả phát nhạc</string>
     <string name="track_info_quality_unknown">Không xác định</string>
-    <string name="placeholder_settings">Tùy chỉnh giao diện Airmedy.</string>
     <string name="appearance_title">Giao diện</string>
     <string name="appearance_theme_title">Giao diện</string>
     <string name="appearance_reduce_transparency">Giảm độ trong suốt</string>

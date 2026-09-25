@@ -8,9 +8,6 @@
     <string name="destination_library">媒体库</string>
     <string name="destination_insight">数据分析</string>
     <string name="destination_settings">设置</string>
-    <string name="placeholder_home">您的音乐主页将显示在此处。</string>
-    <string name="placeholder_library">您的媒体库将显示在此处。</string>
-    <string name="placeholder_insight">数据分析将显示在此处。</string>
     <string name="insight_library_section">媒体库</string>
     <string name="insight_listening_section">播放历史</string>
     <string name="insight_range_7d">7天</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">流派听歌时长图表</string>
     <string name="insight_outcomes_description">播放结果分布图表</string>
     <string name="track_info_quality_unknown">未知</string>
-    <string name="placeholder_settings">自定义 Airmedy 的外观。</string>
     <string name="appearance_title">外观</string>
     <string name="appearance_theme_title">主题</string>
     <string name="appearance_reduce_transparency">减少透明度</string>

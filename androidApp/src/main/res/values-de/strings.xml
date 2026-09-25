@@ -8,9 +8,6 @@
     <string name="destination_library">Mediathek</string>
     <string name="destination_insight">Statistiken</string>
     <string name="destination_settings">Einstellungen</string>
-    <string name="placeholder_home">Ihre Musik-Startseite wird hier angezeigt.</string>
-    <string name="placeholder_library">Ihre Mediathek wird hier angezeigt.</string>
-    <string name="placeholder_insight">Statistiken werden hier angezeigt.</string>
     <string name="insight_library_section">Mediathek</string>
     <string name="insight_listening_section">Verlauf</string>
     <string name="insight_range_7d">7T</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">Diagramm zur Hörzeit nach Genre</string>
     <string name="insight_outcomes_description">Diagramm zu den Wiedergabe-Ergebnissen</string>
     <string name="track_info_quality_unknown">Unbekannt</string>
-    <string name="placeholder_settings">Passen Sie das Erscheinungsbild von Airmedy an.</string>
     <string name="appearance_title">Erscheinungsbild</string>
     <string name="appearance_theme_title">Thema</string>
     <string name="appearance_reduce_transparency">Transparenz reduzieren</string>

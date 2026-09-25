@@ -47,7 +47,6 @@ object MaterialSymbols {
     const val Search = "search"
     const val Settings = "settings"
     const val Schedule = "schedule"
-    const val PlayCircle = "play_circle"
     const val QueueMusic = "queue_music"
     const val Sensors = "sensors"
     const val PlaylistAdd = "playlist_add"
@@ -58,7 +57,6 @@ object MaterialSymbols {
     const val Tune = "tune"
     const val MaskedTransitions = "masked_transitions"
 
-    const val Gradient = "gradient"
     const val Subwoofer = "subwoofer"
     const val ChevronRight = "chevron_right"
     const val ChevronLeft = "chevron_left"

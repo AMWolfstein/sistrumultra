@@ -8,9 +8,6 @@
     <string name="destination_library">Медиатека</string>
     <string name="destination_insight">Аналитика</string>
     <string name="destination_settings">Настройки</string>
-    <string name="placeholder_home">Главный экран музыки появится здесь.</string>
-    <string name="placeholder_library">Ваша медиатека появится здесь.</string>
-    <string name="placeholder_insight">Аналитика появится здесь.</string>
     <string name="insight_library_section">Медиатека</string>
     <string name="insight_listening_section">История</string>
     <string name="insight_range_7d">7 дн</string>
@@ -61,7 +58,6 @@
     <string name="insight_genre_description">График времени прослушивания по жанрам</string>
     <string name="insight_outcomes_description">График итогов воспроизведения</string>
     <string name="track_info_quality_unknown">Неизвестно</string>
-    <string name="placeholder_settings">Настройте внешний вид Airmedy.</string>
     <string name="appearance_title">Внешний вид</string>
     <string name="appearance_theme_title">Тема</string>
     <string name="appearance_reduce_transparency">Уменьшить прозрачность</string>
