@@ -90,7 +90,8 @@ internal fun ComposerDetailsContent(
                     moreLabel = stringResource(R.string.composer_row_more_options),
                     modifier = Modifier.fillMaxWidth().padding(
                         start = 24.dp,
-                        top = contentPadding.calculateTopPadding() - 8.dp,
+                        // A top inset under 8 dp would make this negative, which crashes.
+                        top = (contentPadding.calculateTopPadding() - 8.dp).coerceAtLeast(0.dp),
                         end = 24.dp,
                         bottom = 20.dp,
                     ),
