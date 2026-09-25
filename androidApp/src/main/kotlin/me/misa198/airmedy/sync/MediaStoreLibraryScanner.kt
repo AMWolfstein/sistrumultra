@@ -394,8 +394,9 @@ internal class MediaStoreLibraryScanner(
          *  constant) so the incremental-scan check forces one full re-parse per track
          *  to backfill them, instead of skipping unchanged files forever.
          *  3: the content advisory (explicit) flag.
-         *  4: WAV/AIFF ID3 chunks after the audio data (past the old 24 MB prefix). */
-        const val CurrentMetadataSchemaVersion = 4
+         *  4: WAV/AIFF ID3 chunks after the audio data (past the old 24 MB prefix).
+         *  5: M4A `moov` after `mdat` (past the old 24 MB prefix). */
+        const val CurrentMetadataSchemaVersion = 5
 
         const val ColumnId = MediaStore.Audio.Media._ID
         const val ColumnData = MediaStore.Audio.Media.DATA

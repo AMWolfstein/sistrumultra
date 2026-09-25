@@ -338,6 +338,44 @@ class EmbeddedTagReaderTest {
         assertNull(EmbeddedTagReader.embeddedTrackTags(temp("wav-truncated", head + ByteArray(100)).path))
     }
 
+    /** Matches the device's non-fast-start M4A files: ftyp, free, a 35 MB mdat, then moov. */
+    private fun m4aMoovAfterMdat(ilst: ByteArray, largeSizeMdat: Boolean = false): File {
+        val moov = box("moov", box("udta", box("meta", ByteArray(4) + box("hdlr", ByteArray(8)) + box("ilst", ilst))))
+        val ftyp = box("ftyp", "M4A ".toByteArray(Charsets.ISO_8859_1) + ByteArray(8))
+        val mdatHeader = bytesOf {
+            if (largeSizeMdat) {
+                writeIntBE(1); write("mdat".toByteArray(Charsets.ISO_8859_1)); writeLongBE(16 + largeGap)
+            } else {
+                writeIntBE((8 + largeGap).toInt()); write("mdat".toByteArray(Charsets.ISO_8859_1))
+            }
+        }
+        return sparse("m4a-large", ftyp + box("free", byteArrayOf()) + mdatHeader, largeGap, moov)
+    }
+
+    private fun textAtom(type: String, text: String): ByteArray =
+        box(type, box("data", byteArrayOf(0, 0, 0, 1, 0, 0, 0, 0) + text.toByteArray(Charsets.UTF_8)))
+
+    private fun freeform(name: String, text: String): ByteArray {
+        val mean = box("mean", ByteArray(4) + "com.apple.iTunes".toByteArray(Charsets.UTF_8))
+        val nameBox = box("name", ByteArray(4) + name.toByteArray(Charsets.UTF_8))
+        return box("----", mean + nameBox + box("data", byteArrayOf(0, 0, 0, 1, 0, 0, 0, 0) + text.toByteArray(Charsets.UTF_8)))
+    }
+
+    @Test fun `m4a moov after 35 MB of mdat is read`() {
+        val file = m4aMoovAfterMdat(textAtom("\u00A9day", "2002") + freeform("ISRC", "USIR10211570") + rtng(1) + lyricAtom(lrc) + covr(image))
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals(2002, tags.year)
+        assertEquals("USIR10211570", tags.isrc)
+        assertEquals(true, tags.explicit)
+        assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
+        assertEquals(image.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    @Test fun `m4a moov after a 64-bit mdat is read`() {
+        val file = m4aMoovAfterMdat(rtng(1), largeSizeMdat = true)
+        assertEquals(true, EmbeddedTagReader.embeddedTrackTags(file.path)?.explicit)
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")

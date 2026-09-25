@@ -18,8 +18,8 @@ import java.io.RandomAccessFile
  *   packet is reassembled across pages, so it is read in full (up to a sanity cap).
  * - M4A/MP4 (`ftyp`): `moov > udta > meta > ilst` `covr` artwork, the
  *   `\u00A9lyr` lyrics atom, and the iTunes `----:com.apple.iTunes:LYRICS`
- *   free-form lyrics atom. Tags placed after a leading `mdat` (non-faststart
- *   files) live beyond the bounded prefix and are not read here.
+ *   free-form lyrics atom. Only the `moov` box is read, located by walking the
+ *   top-level box headers, so it is found after a leading `mdat` too.
  * - MP3 ID3v2.2/2.3/2.4: `APIC`/`PIC` artwork and `USLT`/`ULT` lyrics frames. The
  *   tag is read at the size its header declares, not as a fixed prefix.
  * - WAV (`RIFF`/`WAVE`) and AIFF (`FORM`/`AIFF`|`AIFC`): `id3 `/`ID3 `
@@ -27,7 +27,8 @@ import java.io.RandomAccessFile
  *   chunk headers; WAV files with a tag prepended directly to the file are handled
  *   by the ID3 branch.
  *
- * Only a bounded prefix of each file is read (tags live at the file head).
+ * Each format reads only its tag data, located from the sizes the file itself
+ * declares; the byte limits are guards against corrupt sizes.
  */
 /**
  * Supplementary tag values extracted alongside artwork/lyrics. [releaseDate] is an
@@ -86,6 +87,7 @@ internal object EmbeddedTagReader {
     private val OpusTagsMagic = "OpusTags".toByteArray(Charsets.US_ASCII)
     private val VorbisIdMagic = byteArrayOf(0x01) + "vorbis".toByteArray(Charsets.US_ASCII)
     private val VorbisCommentMagic = byteArrayOf(0x03) + "vorbis".toByteArray(Charsets.US_ASCII)
+    /** Guard on the size of the one top-level box read (`moov`), not a file prefix. */
     private const val Mp4ReadLimit = 24 * 1024 * 1024
     /** Guard against a corrupt ID3 size field inside a WAV/AIFF chunk. */
     private const val RiffReadLimit = 24 * 1024 * 1024
@@ -98,7 +100,7 @@ internal object EmbeddedTagReader {
             head.isFlac() -> flacPicture(readPrefix(path, FlacReadLimit) ?: return null)
             head.isId3() -> id3Apic(readId3Tag(path) ?: return null)
             head.isOgg() -> oggPicture(path)
-            head.isMp4() -> mp4Covr(readPrefix(path, Mp4ReadLimit) ?: return null)
+            head.isMp4() -> mp4Covr(readTopLevelMp4Box(path, "moov") ?: return null)
             head.isRiff() || head.isForm() -> riffId3Picture(path)
             else -> null
         }
@@ -113,7 +115,7 @@ internal object EmbeddedTagReader {
             when {
                 head.isFlac() -> flacVorbisLyrics(readPrefix(path, FlacReadLimit) ?: return null)
                 head.isOgg() -> oggVorbisLyrics(path)
-                head.isMp4() -> mp4Lyrics(readPrefix(path, Mp4ReadLimit) ?: return null)
+                head.isMp4() -> mp4Lyrics(readTopLevelMp4Box(path, "moov") ?: return null)
                 head.isRiff() || head.isForm() -> riffId3Lyrics(path)
                 else -> null
             }
@@ -129,7 +131,7 @@ internal object EmbeddedTagReader {
             when {
                 head.isFlac() -> flacExtractedTags(readPrefix(path, FlacReadLimit) ?: return null)
                 head.isOgg() -> oggExtractedTags(path)
-                head.isMp4() -> mp4ExtractedTags(readPrefix(path, Mp4ReadLimit) ?: return null)
+                head.isMp4() -> mp4ExtractedTags(readTopLevelMp4Box(path, "moov") ?: return null)
                 head.isRiff() || head.isForm() -> riffExtractedTags(path)
                 else -> null
             }
@@ -432,20 +434,17 @@ internal object EmbeddedTagReader {
     }
 
     /**
-     * Locates `moov > udta > meta > ilst`. The `meta` box is formally a full
-     * box, but many iTunes-authored files omit its version/flags quartet, so
+     * Locates `udta > meta > ilst` in a `moov` payload. The `meta` box is formally a
+     * full box, but many iTunes-authored files omit its version/flags quartet, so
      * both layouts are accepted.
      */
     private fun ByteArray.mp4IlstRegion(): Pair<Int, Int>? {
-        for (moov in mp4Boxes(0, size)) {
-            if (moov.type != "moov") continue
-            for (udta in mp4Boxes(moov.start, moov.end)) {
-                if (udta.type != "udta") continue
-                for (meta in mp4Boxes(udta.start, udta.end)) {
-                    if (meta.type != "meta") continue
-                    for (ilst in mp4Boxes(metaChildrenStart(meta), meta.end)) {
-                        if (ilst.type == "ilst") return ilst.start to ilst.end
-                    }
+        for (udta in mp4Boxes(0, size)) {
+            if (udta.type != "udta") continue
+            for (meta in mp4Boxes(udta.start, udta.end)) {
+                if (meta.type != "meta") continue
+                for (ilst in mp4Boxes(metaChildrenStart(meta), meta.end)) {
+                    if (ilst.type == "ilst") return ilst.start to ilst.end
                 }
             }
         }
@@ -612,7 +611,8 @@ internal object EmbeddedTagReader {
     }.getOrNull()
 
     /** Payload of the first top-level box of [type], found by walking box headers only,
-     *  so the (possibly many, large) `moof`/`mdat` fragments are skipped, not read. */
+     *  so `mdat` and any `moof` fragments are skipped, not read. This finds `moov`
+     *  wherever it sits: at the front of fast-start files or after `mdat` in the rest. */
     private fun readTopLevelMp4Box(path: String, type: String): ByteArray? =
         java.io.RandomAccessFile(path, "r").use { file ->
             val length = file.length()
