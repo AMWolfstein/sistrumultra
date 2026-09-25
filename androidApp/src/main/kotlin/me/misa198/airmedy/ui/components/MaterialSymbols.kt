@@ -6,8 +6,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -126,10 +126,11 @@ fun MaterialSymbol(
             color = tint,
             textAlign = TextAlign.Center,
         ),
-        modifier = modifier.then(
-            if (contentDescription != null) {
-                Modifier.semantics { this.contentDescription = contentDescription }
-            } else Modifier,
-        ),
+        // The glyph is drawn from ligature text ("search", "more_vert"). Replace the text's
+        // semantics so screen readers announce only the description, or nothing for a
+        // decorative icon, never the ligature name.
+        modifier = modifier.clearAndSetSemantics {
+            if (contentDescription != null) this.contentDescription = contentDescription
+        },
     )
 }
