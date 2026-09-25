@@ -39,7 +39,24 @@ internal data class EmbeddedTrackTags(
     val label: String? = null,
     val isrc: String? = null,
     val copyright: String? = null,
+    /** Content advisory: true explicit, false clean, null when the file carries no advisory. */
+    val explicit: Boolean? = null,
 )
+
+/**
+ * Advisory text value, as SpotiFLAC and iTunes-style taggers write `ITUNESADVISORY`:
+ * "1" explicit, "0"/"2" clean. Anything unrecognised counts as not explicit.
+ */
+internal fun parseAdvisoryText(value: String?): Boolean? {
+    val v = value?.trim()?.lowercase()?.takeIf(String::isNotEmpty) ?: return null
+    return v == "1" || v == "true" || v == "yes" || v == "explicit"
+}
+
+/**
+ * MP4 `rtng` payload. 1 is explicit: it is what SpotiFLAC writes and reads (Apple's
+ * convention is 0 none, 1 explicit, 2 clean). Every other value counts as not explicit.
+ */
+internal fun parseRtngValue(value: Int?): Boolean? = value?.let { it == 1 }
 
 internal object EmbeddedTagReader {
 
@@ -339,6 +356,7 @@ internal object EmbeddedTagReader {
             label = firstOf("LABEL", "PUBLISHER"),
             isrc = firstOf("ISRC"),
             copyright = firstOf("COPYRIGHT"),
+            explicit = parseAdvisoryText(firstOf("ITUNESADVISORY")),
         )
     }
 
@@ -453,8 +471,11 @@ internal object EmbeddedTagReader {
         var label: String? = null
         var isrc: String? = null
         var copyright: String? = null
+        var explicit: Boolean? = null
         for (item in bytes.mp4Boxes(start, end)) {
             when (item.type) {
+                // Content rating: an integer atom, not a text tag.
+                "rtng" -> if (explicit == null) explicit = parseRtngValue(bytes.mp4DataInt(item.start, item.end))
                 "©day" -> if (dateRaw == null) dateRaw = bytes.mp4DataText(item.start, item.end)
                 "tmpo" -> if (bpmRaw == null) bpmRaw = bytes.mp4TmpoText(item.start, item.end)
                 "cprt" -> if (copyright == null) copyright = bytes.mp4DataText(item.start, item.end)
@@ -467,6 +488,7 @@ internal object EmbeddedTagReader {
                             "LABEL", "PUBLISHER" -> if (label == null) label = value
                             "ISRC" -> if (isrc == null) isrc = value
                             "COPYRIGHT" -> if (copyright == null) copyright = value
+                            "ITUNESADVISORY" -> if (explicit == null) explicit = parseAdvisoryText(value)
                         }
                     }
                 }
@@ -479,7 +501,22 @@ internal object EmbeddedTagReader {
             label = label,
             isrc = isrc,
             copyright = copyright,
+            explicit = explicit,
         )
+    }
+
+    /** Big-endian integer payload (1-4 bytes) of an integer `data` atom such as `rtng`. */
+    private fun ByteArray.mp4DataInt(start: Int, end: Int): Int? {
+        for (data in mp4Boxes(start, end)) {
+            if (data.type != "data") continue
+            val payloadStart = data.start + 8
+            val length = data.end - payloadStart
+            if (length !in 1..4) continue
+            var value = 0
+            for (i in payloadStart until data.end) value = (value shl 8) or (this[i].toInt() and 0xFF)
+            return value
+        }
+        return null
     }
 
     /** `tmpo`'s `data` atom holds a big-endian 16-bit integer BPM, not text. */
@@ -713,6 +750,8 @@ internal object EmbeddedTagReader {
     private fun id3ExtractedTags(bytes: ByteArray): EmbeddedTrackTags? {
         val (body, major) = bytes.id3Body() ?: return null
         val values = linkedMapOf<String, String>()
+        // TXXX user-defined text frames, keyed by upper-cased description.
+        val userValues = linkedMapOf<String, String>()
         var pos = 0
         var frames = 0
         if (major == 2) {
@@ -726,6 +765,7 @@ internal object EmbeddedTagReader {
                 if (canonical != null && canonical !in values) {
                     body.copyOfRange(dataStart, dataEnd).parseId3TextFrame()?.let { values[canonical] = it }
                 }
+                if (id == "TXX") body.copyOfRange(dataStart, dataEnd).parseTxxx()?.let { (key, value) -> userValues.putIfAbsent(key, value) }
                 pos = dataEnd
                 frames++
             }
@@ -743,6 +783,7 @@ internal object EmbeddedTagReader {
                 if (id in Id3TextFrameKeysV24 && id !in values) {
                     data.parseId3TextFrame()?.let { values[id] = it }
                 }
+                if (id == "TXXX") data.parseTxxx()?.let { (key, value) -> userValues.putIfAbsent(key, value) }
                 pos = rawEnd
                 frames++
             }
@@ -761,7 +802,19 @@ internal object EmbeddedTagReader {
             label = values["TPUB"],
             isrc = values["TSRC"],
             copyright = values["TCOP"],
+            explicit = parseAdvisoryText(userValues["ITUNESADVISORY"]),
         )
+    }
+
+    /** TXXX/TXX: `<encoding><description>\0<value>` -> (upper-cased description, value). */
+    private fun ByteArray.parseTxxx(): Pair<String, String>? {
+        if (isEmpty()) return null
+        val encoding = this[0].toInt() and 0xFF
+        if (encoding > 3) return null
+        val (description, valueStart) = id3TextField(this, 1, encoding)
+        if (valueStart > size) return null
+        val value = decodeUsltText(copyOfRange(valueStart, size), encoding).trim('\u0000', ' ')
+        return description.trim('\u0000', ' ').uppercase() to value
     }
 
     /** Text-information frame: `<encoding byte><text>`, no length-prefixed terminator required. */

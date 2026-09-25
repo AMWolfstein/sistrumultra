@@ -71,6 +71,7 @@ internal data class PriorTrackScanState(
     val label: String,
     val isrc: String,
     val copyright: String,
+    val explicit: Boolean = false,
 )
 
 /** A previously copied album artwork file, read back so unchanged albums skip
@@ -162,6 +163,7 @@ internal class MediaStoreLibraryScanner(
                 val label = if (unchanged) priorTrack.label else embeddedTags?.label.orEmpty()
                 val isrc = if (unchanged) priorTrack.isrc else embeddedTags?.isrc.orEmpty()
                 val copyright = if (unchanged) priorTrack.copyright else embeddedTags?.copyright.orEmpty()
+                val explicit = if (unchanged) priorTrack.explicit else embeddedTags?.explicit == true
 
                 // Some OEMs report MediaStore.Audio.Media.TRACK as discNumber * 1000 +
                 // trackNumber instead of the plain track number (e.g. 1001..1009 for a
@@ -219,6 +221,7 @@ internal class MediaStoreLibraryScanner(
                     bpm = bpm,
                     label = label,
                     isrc = isrc,
+                    explicit = explicit,
                     schemaVersion = CurrentMetadataSchemaVersion,
                 )
             }
@@ -389,8 +392,9 @@ internal class MediaStoreLibraryScanner(
         /** Bump whenever EmbeddedTagReader extraction gains/changes fields (e.g. the
          *  release date/BPM/label/ISRC/copyright extraction added alongside this
          *  constant) so the incremental-scan check forces one full re-parse per track
-         *  to backfill them, instead of skipping unchanged files forever. */
-        const val CurrentMetadataSchemaVersion = 2
+         *  to backfill them, instead of skipping unchanged files forever.
+         *  3: the content advisory (explicit) flag. */
+        const val CurrentMetadataSchemaVersion = 3
 
         const val ColumnId = MediaStore.Audio.Media._ID
         const val ColumnData = MediaStore.Audio.Media.DATA

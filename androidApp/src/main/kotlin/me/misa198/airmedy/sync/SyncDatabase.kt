@@ -35,6 +35,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -463,6 +464,9 @@ fun LibraryTrack.metadataObject(): JsonObject? = runCatching {
     LibrarySyncProtocol.json.parseToJsonElement(metadataJson) as? JsonObject
 }.getOrNull()
 
+/** True when the file's content advisory marks the track explicit (LocalTrack.explicit). */
+fun LibraryTrack.isExplicit(): Boolean = (metadataObject()?.get("explicit") as? JsonPrimitive)?.booleanOrNull == true
+
 /** Positive track length from the "duration" metadata, which holds LocalTrack.durationMillis
  *  (milliseconds, not seconds); null when absent or not positive. */
 fun LibraryTrack.durationMillis(): Long? = (metadataObject()?.get("duration") as? JsonPrimitive)
@@ -814,6 +818,7 @@ internal class AndroidLibrarySyncStore(
                 label = json.string("label").orEmpty(),
                 isrc = json.string("isrc").orEmpty(),
                 copyright = json.string("copyright").orEmpty(),
+                explicit = json.string("explicit") == "true",
             )
         }.toMap()
         val artworkByArtworkKey = dao.activeArtworkScanState().associate { row ->

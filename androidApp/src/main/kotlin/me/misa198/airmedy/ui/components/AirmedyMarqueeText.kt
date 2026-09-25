@@ -9,6 +9,7 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Text
@@ -23,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,34 +41,65 @@ fun AirmedyMarqueeText(
     style: TextStyle,
     modifier: Modifier = Modifier,
     animate: Boolean = true,
+) = AirmedyMarqueeText(AnnotatedString(text), color, style, modifier, animate)
+
+/**
+ * [text] may carry inline content (appendInlineContent) described by [inlineContent]; its
+ * placeholders are measured with the text so a trailing badge scrolls along with the title.
+ */
+@Composable
+fun AirmedyMarqueeText(
+    text: AnnotatedString,
+    color: Color,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    animate: Boolean = true,
+    inlineContent: Map<String, InlineTextContent> = emptyMap(),
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxWidth().clipToBounds()) {
         val density = LocalDensity.current
         val textMeasurer = rememberTextMeasurer()
         val availableWidthPx = with(density) { maxWidth.roundToPx() }
-        val textWidthPx = remember(text, style, density) {
+        val textWidthPx = remember(text, style, density, inlineContent) {
             textMeasurer.measure(
-                text = AnnotatedString(text),
+                text = text,
                 style = style,
                 softWrap = false,
                 maxLines = 1,
                 overflow = TextOverflow.Clip,
+                placeholders = text.inlinePlaceholders(inlineContent),
             ).size.width
         }
         val travelDistancePx = (textWidthPx - availableWidthPx).coerceAtLeast(0)
         if (travelDistancePx == 0) {
             // Text fits: stay static. An infinite transition here would still tick every
             // frame (animating 0 -> 0) and keep the app redrawing at 60 fps while idle.
-            MarqueeTextLine(text, color, style, translationX = { 0f })
+            MarqueeTextLine(text, color, style, inlineContent, translationX = { 0f })
         } else {
-            ScrollingMarqueeTextLine(text, color, style, travelDistancePx, animate)
+            ScrollingMarqueeTextLine(text, color, style, inlineContent, travelDistancePx, animate)
         }
     }
 }
 
+/** The tag appendInlineContent annotates its range with (InlineTextContent's internal tag). */
+private const val InlineContentTag = "androidx.compose.foundation.text.inlineContent"
+
+private fun AnnotatedString.inlinePlaceholders(inlineContent: Map<String, InlineTextContent>): List<AnnotatedString.Range<Placeholder>> =
+    if (inlineContent.isEmpty()) emptyList()
+    else getStringAnnotations(InlineContentTag, 0, length).mapNotNull { annotation ->
+        inlineContent[annotation.item]?.let { AnnotatedString.Range(it.placeholder, annotation.start, annotation.end) }
+    }
+
 /** Only composed when the text overflows ([travelDistancePx] > 0). */
 @Composable
-private fun ScrollingMarqueeTextLine(text: String, color: Color, style: TextStyle, travelDistancePx: Int, animate: Boolean) {
+private fun ScrollingMarqueeTextLine(
+    text: AnnotatedString,
+    color: Color,
+    style: TextStyle,
+    inlineContent: Map<String, InlineTextContent>,
+    travelDistancePx: Int,
+    animate: Boolean,
+) {
     val targetOffset = -travelDistancePx.toFloat()
     val totalDurationMs = ((travelDistancePx / 20f + 4f) * 1000f).roundToInt().coerceAtLeast(4_000)
     val pauseStartMs = (totalDurationMs * 0.15f).roundToInt()
@@ -97,7 +130,7 @@ private fun ScrollingMarqueeTextLine(text: String, color: Color, style: TextStyl
             ),
             label = "airmedy-marquee-translation",
         )
-        MarqueeTextLine(text, color, style, translationX = { translationX.also { lastOffset[0] = it } })
+        MarqueeTextLine(text, color, style, inlineContent, translationX = { translationX.also { lastOffset[0] = it } })
     } else {
         // Paused: settle back to the start, then stay still (no frames drawn).
         val settle = remember { Animatable(lastOffset[0]) }
@@ -105,12 +138,18 @@ private fun ScrollingMarqueeTextLine(text: String, color: Color, style: TextStyl
             settle.animateTo(0f, tween(400, easing = FastOutSlowInEasing))
             lastOffset[0] = 0f
         }
-        MarqueeTextLine(text, color, style, translationX = { settle.value })
+        MarqueeTextLine(text, color, style, inlineContent, translationX = { settle.value })
     }
 }
 
 @Composable
-private fun MarqueeTextLine(text: String, color: Color, style: TextStyle, translationX: () -> Float) {
+private fun MarqueeTextLine(
+    text: AnnotatedString,
+    color: Color,
+    style: TextStyle,
+    inlineContent: Map<String, InlineTextContent>,
+    translationX: () -> Float,
+) {
     Text(
         text = text,
         modifier = Modifier
@@ -121,5 +160,6 @@ private fun MarqueeTextLine(text: String, color: Color, style: TextStyle, transl
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Clip,
+        inlineContent = inlineContent,
     )
 }

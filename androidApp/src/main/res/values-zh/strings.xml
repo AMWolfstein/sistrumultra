@@ -240,6 +240,7 @@
     <string name="track_context_track_info_title">曲目信息</string>
     <string name="track_info_details">详细信息</string>
     <string name="track_info_quality_lossy">有损</string>
+    <string name="track_explicit">含露骨内容</string>
     <string name="track_info_quality_lossless">无损</string>
     <string name="track_info_quality_hi_res">Hi-Res 高解析</string>
     <string name="track_info_quality_dsd">DSD</string>

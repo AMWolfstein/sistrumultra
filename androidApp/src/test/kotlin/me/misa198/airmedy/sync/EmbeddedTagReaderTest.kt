@@ -229,6 +229,44 @@ class EmbeddedTagReaderTest {
         assertNull(EmbeddedTagReader.fragmentedMp4DurationMillis(file.path))
     }
 
+    // --- Content advisory (SpotiFLAC convention: ITUNESADVISORY=1, rtng 1; clean drops the tag) ---
+
+    private fun explicitOf(file: File): Boolean? = EmbeddedTagReader.embeddedTrackTags(file.path)?.explicit
+
+    @Test fun `flac itunesadvisory marks explicit and clean`() {
+        assertEquals(true, explicitOf(flac(picture = null, comments = listOf("TITLE=a", "ITUNESADVISORY=1"))))
+        assertEquals(false, explicitOf(flac(picture = null, comments = listOf("TITLE=a", "ITUNESADVISORY=0"))))
+        assertEquals(true, explicitOf(flac(picture = null, comments = listOf("TITLE=a", "itunesadvisory=1"))))
+    }
+
+    @Test fun `opus itunesadvisory marks explicit`() {
+        assertEquals(true, explicitOf(temp("opus-explicit", oggOpus(vorbisComment(listOf("TITLE=a", "ITUNESADVISORY=1"))))))
+        assertEquals(false, explicitOf(temp("opus-clean", oggOpus(vorbisComment(listOf("TITLE=a", "ITUNESADVISORY=0"))))))
+    }
+
+    @Test fun `id3 txxx itunesadvisory marks explicit`() {
+        assertEquals(true, explicitOf(temp("id3-explicit", id3v23(frames = listOf(txxx("ITUNESADVISORY", "1"))))))
+        assertEquals(false, explicitOf(temp("id3-clean", id3v23(frames = listOf(txxx("ITUNESADVISORY", "0"))))))
+        // Another user-defined frame is not an advisory.
+        assertEquals(null, explicitOf(temp("id3-other-txxx", id3v23(frames = listOf(txxx("MOOD", "1"))))))
+    }
+
+    @Test fun `m4a rtng 1 is explicit, other values are not`() {
+        assertEquals(true, explicitOf(m4a(ilst = rtng(1))))
+        assertEquals(false, explicitOf(m4a(ilst = rtng(2)))) // iTunes "clean"
+        assertEquals(false, explicitOf(m4a(ilst = rtng(0))))
+        assertEquals(false, explicitOf(m4a(ilst = rtng(4)))) // not a value SpotiFLAC or iTunes writes
+    }
+
+    @Test fun `files without an advisory are not explicit`() {
+        assertEquals(null, explicitOf(flac(picture = null, comments = listOf("TITLE=a"))))
+        assertEquals(null, explicitOf(temp("opus-none", oggOpus(vorbisComment(listOf("TITLE=a"))))))
+        assertEquals(null, explicitOf(temp("id3-none", id3v23(frames = listOf(uslt("eng", lrc))))))
+        assertEquals(null, explicitOf(m4a(ilst = lyricAtom(lrc))))
+        assertEquals(false, parseAdvisoryText(" 0 "))
+        assertEquals(null, parseAdvisoryText(""))
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")
@@ -449,6 +487,19 @@ class EmbeddedTagReaderTest {
         content.write(text.toByteArray(Charsets.UTF_8))
         return frame32(code = "USLT", content.toByteArray(), syncsafe = true)
     }
+
+    private fun txxx(description: String, value: String): ByteArray {
+        val content = ByteArrayOutputStream()
+        content.write(3)
+        content.write(description.toByteArray(Charsets.UTF_8))
+        content.write(0)
+        content.write(value.toByteArray(Charsets.UTF_8))
+        return frame32(code = "TXXX", content.toByteArray(), syncsafe = true)
+    }
+
+    /** `rtng` as SpotiFLAC writes it: a type-21 (integer) data atom holding one byte. */
+    private fun rtng(value: Int): ByteArray =
+        box("rtng", box("data", byteArrayOf(0, 0, 0, 21, 0, 0, 0, 0, value.toByte())))
 
     private fun apic(imageBytes: ByteArray): ByteArray {
         val content = ByteArrayOutputStream()
