@@ -4,9 +4,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * A durable, idempotent edit made on a mobile playlist.  It is deliberately a
- * delta rather than a playlist snapshot: a mobile library may only contain a
- * subset of a desktop playlist's tracks.
+ * A durable, idempotent edit made to a playlist on this device. Playlists are
+ * stored as these deltas and projected by applying the pending mutations in order.
  */
 @Serializable
 data class PlaylistMutation(

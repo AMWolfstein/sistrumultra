@@ -944,22 +944,6 @@ internal object EmbeddedTagReader {
             this[8] == 'A'.code.toByte() && this[9] == 'I'.code.toByte() && this[10] == 'F'.code.toByte() &&
             (this[11] == 'F'.code.toByte() || this[11] == 'C'.code.toByte())
     }
-
-    private fun ByteArray.indexOfNeedle(needle: ByteArray, limit: Int = minOf(size, 262144)): Int {
-        if (needle.isEmpty() || size < needle.size) return -1
-        val maxStart = minOf(size - needle.size, limit - needle.size)
-        for (pos in 0..maxStart) {
-            var matches = true
-            for (i in needle.indices) {
-                if (this[pos + i] != needle[i]) {
-                    matches = false
-                    break
-                }
-            }
-            if (matches) return pos
-        }
-        return -1
-    }
 }
 
 /** Leading 4-digit year from a date-ish tag value ("2023", "2023-05-01", ...). */
