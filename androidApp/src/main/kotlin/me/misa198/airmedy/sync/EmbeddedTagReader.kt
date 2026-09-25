@@ -3,6 +3,7 @@ package me.misa198.airmedy.sync
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
+import java.io.RandomAccessFile
 
 /**
  * Reads embedded tags directly from the audio file's own bytes. Purely JVM
@@ -19,7 +20,8 @@ import java.io.InputStream
  *   `\u00A9lyr` lyrics atom, and the iTunes `----:com.apple.iTunes:LYRICS`
  *   free-form lyrics atom. Tags placed after a leading `mdat` (non-faststart
  *   files) live beyond the bounded prefix and are not read here.
- * - MP3 ID3v2.2/2.3/2.4: `APIC`/`PIC` artwork and `USLT`/`ULT` lyrics frames.
+ * - MP3 ID3v2.2/2.3/2.4: `APIC`/`PIC` artwork and `USLT`/`ULT` lyrics frames. The
+ *   tag is read at the size its header declares, not as a fixed prefix.
  * - WAV (`RIFF`/`WAVE`) and AIFF (`FORM`/`AIFF`|`AIFC`): `id3 `/`ID3 `
  *   chunks carrying an embedded ID3v2 tag; WAV files with a tag prepended
  *   directly to the file are handled by the ID3 branch.
@@ -58,9 +60,23 @@ internal fun parseAdvisoryText(value: String?): Boolean? {
  */
 internal fun parseRtngValue(value: Int?): Boolean? = value?.let { it == 1 }
 
+/**
+ * Total size of the ID3v2 tag starting at [header] (its first 10 bytes): the header,
+ * the synchsafe body size it declares, and the v2.4 footer when flagged. Null when
+ * [header] is not an ID3v2 header.
+ */
+internal fun id3TagSize(header: ByteArray): Long? {
+    if (header.size < 10 || header[0] != 'I'.code.toByte() || header[1] != 'D'.code.toByte() || header[2] != '3'.code.toByte()) return null
+    if (header.sliceArray(6..9).any { it.toInt() and 0x80 != 0 }) return null
+    val major = header[3].toInt() and 0xFF
+    val hasFooter = major == 4 && header[5].toInt() and 0x10 != 0
+    return 10L + header.syncsafeInt(6) + if (hasFooter) 10 else 0
+}
+
 internal object EmbeddedTagReader {
 
     private const val FlacReadLimit = 8 * 1024 * 1024
+    /** Guard against a corrupt ID3 size field; a real tag is read at its declared size. */
     private const val Id3ReadLimit = 24 * 1024 * 1024
     /** Cap on bytes walked to reassemble the OGG header packets (same bound as ID3). */
     private const val OggReadLimit = 24 * 1024 * 1024
@@ -78,7 +94,7 @@ internal object EmbeddedTagReader {
         val head = readPrefix(path, MagicReadLimit) ?: return null
         when {
             head.isFlac() -> flacPicture(readPrefix(path, FlacReadLimit) ?: return null)
-            head.isId3() -> id3Apic(readPrefix(path, Id3ReadLimit) ?: return null)
+            head.isId3() -> id3Apic(readId3Tag(path) ?: return null)
             head.isOgg() -> oggPicture(path)
             head.isMp4() -> mp4Covr(readPrefix(path, Mp4ReadLimit) ?: return null)
             head.isRiff() || head.isForm() -> riffId3Picture(readPrefix(path, RiffReadLimit) ?: return null)
@@ -89,7 +105,7 @@ internal object EmbeddedTagReader {
     /** Embedded lyrics text (`LYRICS` -> `UNSYNCEDLYRICS` -> `USLT` -> M4A/AIFF), or null. */
     fun embeddedLyricsText(path: String): String? = runCatching {
         if (id3Magic(path)) {
-            id3Uslt(readPrefix(path, Id3ReadLimit) ?: return null)
+            id3Uslt(readId3Tag(path) ?: return null)
         } else {
             val head = readPrefix(path, MagicReadLimit) ?: return null
             when {
@@ -105,7 +121,7 @@ internal object EmbeddedTagReader {
     /** Release date/year, BPM, label, ISRC, and copyright read from the file's own tags. */
     fun embeddedTrackTags(path: String): EmbeddedTrackTags? = runCatching {
         if (id3Magic(path)) {
-            id3ExtractedTags(readPrefix(path, Id3ReadLimit) ?: return null)
+            id3ExtractedTags(readId3Tag(path) ?: return null)
         } else {
             val head = readPrefix(path, MagicReadLimit) ?: return null
             when {
@@ -123,6 +139,19 @@ internal object EmbeddedTagReader {
         if (!file.isFile || file.length() < 10L) return false
         val head = runCatching { file.inputStream().use { readUpTo(it, 10) } }.getOrNull() ?: return false
         return head.isId3()
+    }
+
+    /** The leading ID3v2 tag, read at the size its header declares (capped by [Id3ReadLimit]). */
+    private fun readId3Tag(path: String): ByteArray? = RandomAccessFile(path, "r").use { file ->
+        val length = file.length()
+        if (length < 10L) return null
+        val header = ByteArray(10)
+        file.readFully(header)
+        val tagSize = id3TagSize(header) ?: return null
+        val bytes = ByteArray(minOf(tagSize, length, Id3ReadLimit.toLong()).toInt())
+        file.seek(0)
+        file.readFully(bytes)
+        bytes
     }
 
     private fun readPrefix(path: String, limit: Int): ByteArray? {

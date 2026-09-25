@@ -267,6 +267,35 @@ class EmbeddedTagReaderTest {
         assertEquals(null, parseAdvisoryText(""))
     }
 
+    // --- Tags of large files (read by declared size / box and chunk walks, not a fixed prefix) ---
+
+    private val largeGap = 35L * 1024 * 1024
+
+    private fun tagFrames(): List<ByteArray> = listOf(
+        frame32("TDRC", byteArrayOf(3) + "2002".toByteArray(), syncsafe = true),
+        frame32("TSRC", byteArrayOf(3) + "USIR10211570".toByteArray(), syncsafe = true),
+        txxx("ITUNESADVISORY", "1"),
+    )
+
+    @Test fun `id3 tag size comes from its header`() {
+        val v23 = id3v23(frames = listOf(uslt("eng", lrc)))
+        assertEquals(v23.size.toLong(), id3TagSize(v23))
+        // v2.4 footer flag adds the 10-byte footer.
+        val v24Footer = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 4, 0, 0x10, 0, 0, 0x02, 0x01)
+        assertEquals(10L + 257 + 10, id3TagSize(v24Footer))
+        assertNull(id3TagSize("RIFF\u0000\u0000\u0000\u0000WAVE".toByteArray()))
+        // A size byte with its high bit set is not synchsafe: a corrupt header.
+        assertNull(id3TagSize(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0, 0, 0, 0x80.toByte(), 0)))
+    }
+
+    @Test fun `mp3 tag ahead of 35 MB of audio is read`() {
+        val file = sparse("mp3-large", id3v23(frames = tagFrames()), largeGap, byteArrayOf(0xFF.toByte(), 0xFB.toByte()))
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals(2002, tags.year)
+        assertEquals("USIR10211570", tags.isrc)
+        assertEquals(true, tags.explicit)
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")
@@ -291,6 +320,17 @@ class EmbeddedTagReaderTest {
         val file = temp("wav-no-id3", out.toByteArray())
         assertNull(EmbeddedTagReader.embeddedLyricsText(file.path))
         assertNull(EmbeddedTagReader.embeddedArtworkBytes(file.path))
+    }
+
+    /** [head], then [gap] zero bytes left as a sparse hole (cheap on disk), then [tail]. */
+    private fun sparse(name: String, head: ByteArray, gap: Long, tail: ByteArray): File {
+        val file = File.createTempFile(name, ".test").apply { deleteOnExit() }
+        java.io.RandomAccessFile(file, "rw").use { raf ->
+            raf.write(head)
+            raf.seek(head.size + gap)
+            raf.write(tail)
+        }
+        return file
     }
 
     private fun temp(name: String, bytes: ByteArray): File =
