@@ -39,6 +39,11 @@ internal object ArtistSeparator {
         "feat.", "ft.", "featuring", "x", "with", "vs.",
         "、", "／", "・", "•",
     )
+    /**
+     * Genre defaults: ";" and "،" only. "/" and "&" routinely appear inside one genre name
+     * ("Hip-Hop/Rap", "R&B/Soul"), so the artist set would break correctly tagged genres.
+     */
+    val DEFAULT_GENRE_TOKENS: List<String> = listOf(";", "\u060C")
     private const val ESCAPE_CHAR = '\\'
     private const val PLACEHOLDER_PREFIX = "\u0000\u0001"
     private const val PLACEHOLDER_SUFFIX = '\u0002'

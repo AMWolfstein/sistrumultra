@@ -86,11 +86,10 @@ private val BaseDelimiters = listOf(
     BaseDelimiter("&", R.string.tag_separators_ampersand),
     BaseDelimiter("،", R.string.tag_separators_arabic_comma),
 )
-private val BaseTokens = BaseDelimiters.map { it.token }
 
 private val QuickSuggestions = listOf("feat.", "ft.", "featuring", "//", " x ", "with", "vs.", ",", "،", "、", "／", "・", "•")
 
-private val PreviewExamples = listOf(
+private val ArtistPreviewExamples = listOf(
     "Kendrick Lamar; SZA",
     "AC\\/DC",
     "Tyler, The Creator",
@@ -99,6 +98,48 @@ private val PreviewExamples = listOf(
     "Artist 1 / Artist 2",
     "عمرو دياب، تامر حسني",
 )
+
+// Genres get their own list: "/" and "&" occur inside real genre names ("Hip-Hop/Rap").
+private val GenrePresets = listOf(
+    DelimiterPreset(R.string.tag_separators_preset_genre_default, ArtistSeparator.DEFAULT_GENRE_TOKENS),
+    DelimiterPreset(R.string.tag_separators_preset_minimal, listOf(";")),
+)
+
+private val GenreBaseDelimiters = listOf(
+    BaseDelimiter(";", R.string.tag_separators_semicolon),
+    BaseDelimiter("،", R.string.tag_separators_arabic_comma),
+    BaseDelimiter(",", R.string.tag_separators_comma),
+    BaseDelimiter("/", R.string.tag_separators_slash),
+    BaseDelimiter("&", R.string.tag_separators_ampersand),
+)
+
+private val GenrePreviewExamples = listOf(
+    "Soundtrack; Hip-Hop/Rap",
+    "Hip-Hop/Rap; Hardcore Rap; Rap",
+    "R&B/Soul",
+    "Singer/Songwriter",
+    "Pop، Rock",
+)
+
+/** What the delimiter sheet edits: the artist/composer list or the genre list. */
+private class DelimiterSheetConfig(
+    val titleRes: Int,
+    val presets: List<DelimiterPreset>,
+    val baseDelimiters: List<BaseDelimiter>,
+    val defaults: List<String>,
+    val examples: List<String>,
+) {
+    val baseTokens = baseDelimiters.map { it.token }
+}
+
+private val ArtistSheet = DelimiterSheetConfig(
+    R.string.tag_separators_configure, Presets, BaseDelimiters, ArtistSeparator.DEFAULT_TOKENS, ArtistPreviewExamples,
+)
+private val GenreSheet = DelimiterSheetConfig(
+    R.string.tag_separators_configure_genres, GenrePresets, GenreBaseDelimiters, ArtistSeparator.DEFAULT_GENRE_TOKENS, GenrePreviewExamples,
+)
+
+private enum class SheetTarget { Artists, Genres }
 
 @Composable
 internal fun TagSeparatorsContent(modifier: Modifier = Modifier) {
@@ -109,8 +150,9 @@ internal fun TagSeparatorsContent(modifier: Modifier = Modifier) {
     val settings by preferences.settings.collectAsStateWithLifecycle(initialValue = null)
     val appliedSignature by preferences.appliedSignature.collectAsStateWithLifecycle(initialValue = null)
     val customTokens by preferences.customDelimiters.collectAsStateWithLifecycle(initialValue = emptyList())
+    val genreCustomTokens by preferences.genreCustomDelimiters.collectAsStateWithLifecycle(initialValue = emptyList())
     val tracks by AndroidSyncRuntime.syncStore().tracks.collectAsStateWithLifecycle(initialValue = emptyList())
-    var showSheet by remember { mutableStateOf(false) }
+    var sheet by remember { mutableStateOf<SheetTarget?>(null) }
     var scanState by remember { mutableStateOf(LibraryScanUiState()) }
     val current = settings ?: return
 
@@ -133,23 +175,8 @@ internal fun TagSeparatorsContent(modifier: Modifier = Modifier) {
                         ),
                     )
                     if (current.enabled) {
-                        add(
-                            ActionListItem(
-                                R.string.tag_separators_delimiters,
-                                trailingContent = {
-                                    // Capped so a long list can't squeeze the row label.
-                                    Text(
-                                        text = current.delimiters.joinToString("  "),
-                                        modifier = Modifier.widthIn(max = 150.dp),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.textMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                                onClick = { showSheet = true },
-                            ),
-                        )
+                        add(delimiterRow(R.string.tag_separators_delimiters, current.delimiters) { sheet = SheetTarget.Artists })
+                        add(delimiterRow(R.string.tag_separators_genre_delimiters, current.genreDelimiters) { sheet = SheetTarget.Genres })
                     }
                 },
                 containerStyle = ActionListContainerStyle.Plain,
@@ -197,8 +224,9 @@ internal fun TagSeparatorsContent(modifier: Modifier = Modifier) {
         }
     }
 
-    if (showSheet) {
-        TagSeparatorsSheet(
+    when (sheet) {
+        SheetTarget.Artists -> TagSeparatorsSheet(
+            config = ArtistSheet,
             active = current.delimiters,
             savedCustom = customTokens,
             onSave = { tokens, custom ->
@@ -207,16 +235,46 @@ internal fun TagSeparatorsContent(modifier: Modifier = Modifier) {
                     preferences.setDelimiters(tokens)
                 }
             },
-            onDismiss = { showSheet = false },
+            onDismiss = { sheet = null },
         )
+        SheetTarget.Genres -> TagSeparatorsSheet(
+            config = GenreSheet,
+            active = current.genreDelimiters,
+            savedCustom = genreCustomTokens,
+            onSave = { tokens, custom ->
+                scope.launch {
+                    preferences.setGenreCustomDelimiters(custom)
+                    preferences.setGenreDelimiters(tokens)
+                }
+            },
+            onDismiss = { sheet = null },
+        )
+        null -> Unit
     }
 }
 
 private enum class SheetPage { Main, AddCustom }
 
+/** A settings row showing a delimiter list; capped so a long list can't squeeze the label. */
+private fun delimiterRow(labelRes: Int, tokens: List<String>, onClick: () -> Unit) = ActionListItem(
+    labelRes,
+    trailingContent = {
+        Text(
+            text = tokens.joinToString("  "),
+            modifier = Modifier.widthIn(max = 150.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = LocalAirmedyColors.current.textMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    },
+    onClick = onClick,
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagSeparatorsSheet(
+    config: DelimiterSheetConfig,
     active: List<String>,
     savedCustom: List<String>,
     onSave: (tokens: List<String>, custom: List<String>) -> Unit,
@@ -225,7 +283,7 @@ private fun TagSeparatorsSheet(
     val colors = LocalAirmedyColors.current
     var page by remember { mutableStateOf(SheetPage.Main) }
     var activeTokens by remember { mutableStateOf(active) }
-    var customTokens by remember { mutableStateOf((savedCustom + active.filterNot { it in BaseTokens }).distinct()) }
+    var customTokens by remember { mutableStateOf((savedCustom + active.filterNot { it in config.baseTokens }).distinct()) }
     var input by remember { mutableStateOf("") }
 
     fun toggle(token: String) {
@@ -247,7 +305,7 @@ private fun TagSeparatorsSheet(
     AirmedyBottomSheet(
         title = {
             Text(
-                stringResource(if (page == SheetPage.Main) R.string.tag_separators_configure else R.string.tag_separators_add_custom),
+                stringResource(if (page == SheetPage.Main) config.titleRes else R.string.tag_separators_add_custom),
                 style = MaterialTheme.typography.titleMedium,
             )
         },
@@ -263,20 +321,20 @@ private fun TagSeparatorsSheet(
                 SheetPage.Main -> {
                     SheetLabel(R.string.tag_separators_presets)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Presets.forEach { preset ->
+                        config.presets.forEach { preset ->
                             DelimiterChip(
                                 label = stringResource(preset.nameRes),
                                 selected = activeTokens.toSet() == preset.tokens.toSet(),
                                 onClick = {
                                     activeTokens = preset.tokens
-                                    customTokens = (customTokens + preset.tokens.filterNot { it in BaseTokens }).distinct()
+                                    customTokens = (customTokens + preset.tokens.filterNot { it in config.baseTokens }).distinct()
                                 },
                             )
                         }
                     }
                     SheetLabel(R.string.tag_separators_active)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        BaseDelimiters.forEach { base ->
+                        config.baseDelimiters.forEach { base ->
                             DelimiterChip(
                                 label = "${base.token}  ${stringResource(base.nameRes)}",
                                 selected = base.token in activeTokens,
@@ -293,7 +351,7 @@ private fun TagSeparatorsSheet(
                     }
                     SheetLabel(R.string.tag_separators_preview)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        PreviewExamples.forEach { example ->
+                        config.examples.forEach { example ->
                             Text(
                                 text = "$example  →  " + ArtistSeparator.splitArtistNames(example, activeTokens, true).joinToString(" | "),
                                 style = MaterialTheme.typography.bodySmall,
@@ -305,7 +363,7 @@ private fun TagSeparatorsSheet(
                         AirmedyPillButton(
                             label = stringResource(R.string.tag_separators_reset),
                             variant = AirmedyPillButtonVariant.Secondary,
-                            onClick = { activeTokens = ArtistSeparator.DEFAULT_TOKENS },
+                            onClick = { activeTokens = config.defaults },
                             modifier = Modifier.weight(1f),
                         )
                         AirmedyPillButton(

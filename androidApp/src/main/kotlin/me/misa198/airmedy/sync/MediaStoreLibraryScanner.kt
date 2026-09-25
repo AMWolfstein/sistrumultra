@@ -200,9 +200,7 @@ internal class MediaStoreLibraryScanner(
                     ),
                     albumArtists = artistsOf(albumArtistName),
                     composers = composersOf(tag(ColumnComposer) ?: ""),
-                    genres = genresByTrack[mediaId].orEmpty().mapNotNull { raw ->
-                        raw.trim().takeIf(String::isNotEmpty)?.let { LocalGenre(genreId(it), it) }
-                    },
+                    genres = localGenresOf(genresByTrack[mediaId].orEmpty(), separators),
                     durationMillis = durationMillisOf(number(ColumnDuration), data),
                     discNumber = number(ColumnDiscNumber)?.toInt() ?: 0,
                     trackNumber = trackNumber,
@@ -535,6 +533,16 @@ internal fun localArtistsOf(raw: String, separators: TagSeparatorSettings): List
     ArtistSeparator.splitArtistNames(raw, separators.delimiters, separators.enabled)
         .map { name -> LocalArtistRef(id = artistId(name), name = name, sortName = "") }
         .ifEmpty { listOf(LocalArtistRef(id = artistId(raw), name = raw, sortName = "")) }
+
+/**
+ * A track's genres from MediaStore's Genres table. Android keeps a tag like
+ * "Soundtrack; Hip-Hop/Rap" as one genre, so each entry is split with the genre
+ * delimiters (not the artist ones: "/" and "&" occur inside real genre names).
+ */
+internal fun localGenresOf(rawNames: List<String>, separators: TagSeparatorSettings): List<LocalGenre> =
+    rawNames.flatMap { raw -> ArtistSeparator.splitArtistNames(raw, separators.genreDelimiters, separators.enabled) }
+        .map { name -> LocalGenre(genreId(name), name) }
+        .distinctBy(LocalGenre::id)
 
 /** Splits a composer tag with the same delimiters as artists. */
 internal fun localComposersOf(raw: String, separators: TagSeparatorSettings): List<LocalComposer> =

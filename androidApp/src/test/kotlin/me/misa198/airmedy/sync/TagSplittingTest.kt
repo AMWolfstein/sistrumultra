@@ -73,4 +73,50 @@ class TagSplittingTest {
         assert(base.signature != TagSeparatorSettings(delimiters = listOf(";")).signature)
         assert(base.signature != TagSeparatorSettings(enabled = false).signature)
     }
+
+    // --- Genres ---
+
+    private fun genres(vararg raw: String, settings: TagSeparatorSettings = defaults) = localGenresOf(raw.toList(), settings).map { it.name }
+
+    @Test fun `genre defaults are semicolon and the Arabic comma only`() {
+        assertEquals(listOf(";", "\u060C"), ArtistSeparator.DEFAULT_GENRE_TOKENS)
+        assertEquals(ArtistSeparator.DEFAULT_GENRE_TOKENS, defaults.genreDelimiters)
+    }
+
+    @Test fun `combined genre entries from the test files resolve to real genres`() {
+        // The three Genres-table entries Android left unsplit on the CPH2307.
+        assertEquals(listOf("Soundtrack", "Hip-Hop/Rap"), genres("Soundtrack; Hip-Hop/Rap"))
+        assertEquals(listOf("Hip-Hop/Rap", "Soundtrack"), genres("Hip-Hop/Rap; Soundtrack"))
+        assertEquals(
+            listOf("Hip-Hop/Rap", "Hardcore Rap", "Rap", "Underground Rap"),
+            genres("Hip-Hop/Rap; Hardcore Rap; Rap; Underground Rap"),
+        )
+        assertEquals(listOf("Mix"), genres("Mix"))
+    }
+
+    @Test fun `slash and ampersand inside genre names are kept`() {
+        assertEquals(listOf("Hip-Hop/Rap", "R&B/Soul", "Singer/Songwriter", "Drum & Bass"), genres("Hip-Hop/Rap", "R&B/Soul", "Singer/Songwriter", "Drum & Bass"))
+        assertEquals(listOf("Pop", "Rock"), genres("Pop\u060C Rock"))
+    }
+
+    @Test fun `genres from several entries are merged by id`() {
+        // "Rap" and "rap" fold to the same genre id; the first spelling wins.
+        assertEquals(listOf("Soundtrack", "Hip-Hop/Rap", "Rap"), genres("Soundtrack; Hip-Hop/Rap", "Hip-Hop/Rap; Soundtrack; Rap", "rap"))
+        assertEquals(genreId("Soundtrack"), localGenresOf(listOf("Soundtrack; Rap"), defaults).first().id)
+    }
+
+    @Test fun `genre delimiters are configured separately and share the switch`() {
+        val slashToo = TagSeparatorSettings(genreDelimiters = listOf(";", "/"))
+        assertEquals(listOf("Soundtrack", "Hip-Hop", "Rap"), genres("Soundtrack; Hip-Hop/Rap", settings = slashToo))
+        assertEquals(listOf("Soundtrack; Hip-Hop/Rap"), genres("Soundtrack; Hip-Hop/Rap", settings = TagSeparatorSettings(enabled = false)))
+        assertEquals(listOf("Hip-Hop/Rap"), genres("Hip-Hop\\/Rap", settings = slashToo))
+    }
+
+    @Test fun `blank genre entries are dropped`() {
+        assertEquals(emptyList(), genres("", "  "))
+    }
+
+    @Test fun `the signature includes the genre delimiters`() {
+        assert(TagSeparatorSettings().signature != TagSeparatorSettings(genreDelimiters = listOf(";")).signature)
+    }
 }
