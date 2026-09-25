@@ -376,6 +376,33 @@ class EmbeddedTagReaderTest {
         assertEquals(true, EmbeddedTagReader.embeddedTrackTags(file.path)?.explicit)
     }
 
+    private fun flacBlockHeader(type: Int, length: Int, last: Boolean): ByteArray =
+        byteArrayOf(((if (last) 0x80 else 0) or type).toByte(), (length shr 16 and 0xFF).toByte(), (length shr 8 and 0xFF).toByte(), (length and 0xFF).toByte())
+
+    @Test fun `flac comments and cover after 12 MB of padding are read`() {
+        val padding = 12 * 1024 * 1024
+        val head = "fLaC".toByteArray(Charsets.ISO_8859_1) + flacBlockHeader(0, 34, last = false) + ByteArray(34) +
+            flacBlockHeader(1, padding, last = false)
+        val comment = vorbisComment(listOf("DATE=2002", "ISRC=USIR10211570", "ITUNESADVISORY=1", "LYRICS=$lrc"))
+        val picture = pictureBlock(image)
+        val tail = flacBlockHeader(FLAC_VORBIS_COMMENT, comment.size, last = false) + comment +
+            flacBlockHeader(FLAC_PICTURE, picture.size, last = true) + picture + ByteArray(1024) // audio frames
+        val file = sparse("flac-padded", head, padding.toLong(), tail)
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals(2002, tags.year)
+        assertEquals("USIR10211570", tags.isrc)
+        assertEquals(true, tags.explicit)
+        assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
+        assertEquals(image.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    @Test fun `flac cover larger than 8 MB is read, and tags after it`() {
+        val bigCover = imageOfSize(9 * 1024 * 1024, seed = 3)
+        val file = flac(picture = bigCover, comments = listOf("ITUNESADVISORY=1"))
+        assertEquals(bigCover.size, EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.size)
+        assertEquals(true, EmbeddedTagReader.embeddedTrackTags(file.path)?.explicit)
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")

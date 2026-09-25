@@ -395,8 +395,9 @@ internal class MediaStoreLibraryScanner(
          *  to backfill them, instead of skipping unchanged files forever.
          *  3: the content advisory (explicit) flag.
          *  4: WAV/AIFF ID3 chunks after the audio data (past the old 24 MB prefix).
-         *  5: M4A `moov` after `mdat` (past the old 24 MB prefix). */
-        const val CurrentMetadataSchemaVersion = 5
+         *  5: M4A `moov` after `mdat` (past the old 24 MB prefix).
+         *  6: FLAC Vorbis comments past the old 8 MB prefix (after large padding or covers). */
+        const val CurrentMetadataSchemaVersion = 6
 
         const val ColumnId = MediaStore.Audio.Media._ID
         const val ColumnData = MediaStore.Audio.Media.DATA

@@ -12,7 +12,8 @@ import java.io.RandomAccessFile
  * Covered formats:
  * - FLAC (`fLaC`): METADATA_BLOCK_PICTURE (front cover) artwork and the
  *   Vorbis-comment `LYRICS`/`UNSYNCEDLYRICS` tags. The `LYRICS` tag commonly
- *   holds LRC-formatted synced text.
+ *   holds LRC-formatted synced text. Only the needed metadata blocks are read,
+ *   found by walking the block headers.
  * - OGG Opus/Vorbis (`OggS`): Vorbis-comment `LYRICS`/`UNSYNCEDLYRICS` text and
  *   `METADATA_BLOCK_PICTURE` artwork (base64 per RFC 7845). The comment header
  *   packet is reassembled across pages, so it is read in full (up to a sanity cap).
@@ -77,7 +78,10 @@ internal fun id3TagSize(header: ByteArray): Long? {
 
 internal object EmbeddedTagReader {
 
-    private const val FlacReadLimit = 8 * 1024 * 1024
+    /** Guard on the metadata blocks read from one FLAC file (generous for large covers). */
+    private const val FlacReadLimit = 24 * 1024 * 1024
+    private const val FlacVorbisComment = 4
+    private const val FlacPicture = 6
     /** Guard against a corrupt ID3 size field; a real tag is read at its declared size. */
     private const val Id3ReadLimit = 24 * 1024 * 1024
     /** Cap on bytes walked to reassemble the OGG header packets (same bound as ID3). */
@@ -97,7 +101,7 @@ internal object EmbeddedTagReader {
     fun embeddedArtworkBytes(path: String): ByteArray? = runCatching {
         val head = readPrefix(path, MagicReadLimit) ?: return null
         when {
-            head.isFlac() -> flacPicture(readPrefix(path, FlacReadLimit) ?: return null)
+            head.isFlac() -> flacPicture(readFlacBlocks(path, FlacPicture) ?: return null)
             head.isId3() -> id3Apic(readId3Tag(path) ?: return null)
             head.isOgg() -> oggPicture(path)
             head.isMp4() -> mp4Covr(readTopLevelMp4Box(path, "moov") ?: return null)
@@ -113,7 +117,7 @@ internal object EmbeddedTagReader {
         } else {
             val head = readPrefix(path, MagicReadLimit) ?: return null
             when {
-                head.isFlac() -> flacVorbisLyrics(readPrefix(path, FlacReadLimit) ?: return null)
+                head.isFlac() -> flacVorbisLyrics(readFlacBlocks(path, FlacVorbisComment) ?: return null)
                 head.isOgg() -> oggVorbisLyrics(path)
                 head.isMp4() -> mp4Lyrics(readTopLevelMp4Box(path, "moov") ?: return null)
                 head.isRiff() || head.isForm() -> riffId3Lyrics(path)
@@ -129,7 +133,7 @@ internal object EmbeddedTagReader {
         } else {
             val head = readPrefix(path, MagicReadLimit) ?: return null
             when {
-                head.isFlac() -> flacExtractedTags(readPrefix(path, FlacReadLimit) ?: return null)
+                head.isFlac() -> flacExtractedTags(readFlacBlocks(path, FlacVorbisComment) ?: return null)
                 head.isOgg() -> oggExtractedTags(path)
                 head.isMp4() -> mp4ExtractedTags(readTopLevelMp4Box(path, "moov") ?: return null)
                 head.isRiff() || head.isForm() -> riffExtractedTags(path)
@@ -178,6 +182,47 @@ internal object EmbeddedTagReader {
     }
 
     // ---------------------------------------------------------------- FLAC
+
+    /**
+     * The FLAC metadata blocks of [type], re-framed as `fLaC` + blocks (the final one
+     * flagged last) for the block parsers below. Block headers are walked by seeking,
+     * so padding, seek tables and other large blocks before them are skipped, not read.
+     * A block that would take the total past [FlacReadLimit] is skipped.
+     */
+    private fun readFlacBlocks(path: String, type: Int): ByteArray? = RandomAccessFile(path, "r").use { file ->
+        val length = file.length()
+        val header = ByteArray(4)
+        if (length < 8L) return null
+        file.readFully(header)
+        if (!header.isFlac()) return null
+        val out = ByteArrayOutputStream()
+        out.write(header)
+        var lastHeaderOffset = -1
+        var pos = 4L
+        var block = 0
+        while (pos + 4 <= length && block < 256) {
+            file.seek(pos)
+            file.readFully(header)
+            val blockType = header[0].toInt() and 0x7F
+            val last = header[0].toInt() and 0x80 != 0
+            val blockLength = header.readUInt24BE(1)
+            val payloadStart = pos + 4
+            if (payloadStart + blockLength > length) break
+            if (blockType == type && out.size() + 4 + blockLength <= FlacReadLimit) {
+                lastHeaderOffset = out.size()
+                header[0] = blockType.toByte()
+                out.write(header)
+                val payload = ByteArray(blockLength)
+                file.readFully(payload)
+                out.write(payload)
+            }
+            if (last) break
+            pos = payloadStart + blockLength
+            block++
+        }
+        if (lastHeaderOffset < 0) return null
+        out.toByteArray().also { it[lastHeaderOffset] = (it[lastHeaderOffset].toInt() or 0x80).toByte() }
+    }
 
     private fun flacPicture(bytes: ByteArray): ByteArray? {
         var offset = 4
