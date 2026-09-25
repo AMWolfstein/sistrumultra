@@ -37,7 +37,6 @@ import android.view.WindowInsetsController
 import android.view.KeyEvent
 import me.misa198.airmedy.settings.ThemeMode
 import me.misa198.airmedy.settings.ThemePreferences
-import me.misa198.airmedy.device.DeviceIdentity
 import me.misa198.airmedy.sync.AndroidSyncRuntime
 import me.misa198.airmedy.player.AndroidPlaybackRuntime
 import me.misa198.airmedy.player.AndroidPlaybackSession
@@ -80,7 +79,6 @@ class MainActivity : ComponentActivity() {
     private val insightViewModel: InsightViewModel by viewModels {
         InsightViewModel.Factory(
             AndroidSyncRuntime.syncStore(),
-            flowOf(DeviceIdentity(applicationContext).id),
             AndroidPlaybackRuntime.controller(),
         )
     }
@@ -272,7 +270,6 @@ class MainActivity : ComponentActivity() {
                     state = insightUiState,
                     onLibraryPeriodSelected = insightViewModel::setLibraryPeriod,
                     onListeningPeriodSelected = insightViewModel::setListeningPeriod,
-                    onSourceSelected = insightViewModel::setSourceFilter,
                     onTrackClick = insightViewModel::playTopTrack,
                 ),
                 library = LibraryDestinationModel(

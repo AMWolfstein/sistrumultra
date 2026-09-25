@@ -36,12 +36,12 @@ class InsightViewModelTest {
             DailyPlaybackAttemptStat("phone", "2026-01-10", 2, 1, 1, 0, 500),
             DailyPlaybackAttemptStat("desktop", "2026-01-09", 1, 0, 0, 1, 200),
         ),
-        deviceId = "phone",
     )
 
     @Test
-    fun mirrorsListeningCalculationsAndRankingsAcrossAllDevices() {
-        val state = buildInsightUiState(raw, InsightPeriod.SevenDays, InsightPeriod.SevenDays, InsightSourceFilter.All, LocalDate.parse("2026-01-10"))
+    fun countsEveryStoredListeningRecord() {
+        // Records carry a source device ID, but only this phone writes them; none are filtered out.
+        val state = buildInsightUiState(raw, InsightPeriod.SevenDays, InsightPeriod.SevenDays, LocalDate.parse("2026-01-10"))
 
         assertEquals(960, state.listening.listenedSeconds)
         assertEquals(6, state.listening.plays)
@@ -55,12 +55,9 @@ class InsightViewModelTest {
     }
 
     @Test
-    fun sourceFilterAndLibraryProjectionFilterByDevice() {
-        val state = buildInsightUiState(raw, InsightPeriod.SevenDays, InsightPeriod.SevenDays, InsightSourceFilter.ThisPhone, LocalDate.parse("2026-01-10"))
+    fun libraryProjection() {
+        val state = buildInsightUiState(raw, InsightPeriod.SevenDays, InsightPeriod.SevenDays, LocalDate.parse("2026-01-10"))
 
-        assertEquals(600, state.listening.listenedSeconds)
-        assertEquals(1, state.listening.streakDays)
-        assertTrue(state.hasOtherSources)
         assertEquals(3, state.library.tracks)
         assertEquals(2, state.library.albums)
         assertEquals(1, state.library.playlists)
@@ -68,15 +65,12 @@ class InsightViewModelTest {
         assertEquals(3, state.library.growth.last().value)
         assertEquals(1, state.library.quality.first { it.quality == TrackAudioQuality.HiRes }.count)
         assertEquals(1, state.library.quality.first { it.quality == TrackAudioQuality.Lossy }.count)
-
-        val other = buildInsightUiState(raw, InsightPeriod.SevenDays, InsightPeriod.SevenDays, InsightSourceFilter.Other, LocalDate.parse("2026-01-10"))
-        assertEquals(360, other.listening.listenedSeconds)
     }
 
     @Test
     fun longerListeningRangesKeepTheActivityData() {
         listOf(InsightPeriod.ThirtyDays, InsightPeriod.All).forEach { period ->
-            val state = buildInsightUiState(raw, InsightPeriod.SevenDays, period, InsightSourceFilter.All, LocalDate.parse("2026-01-10"))
+            val state = buildInsightUiState(raw, InsightPeriod.SevenDays, period, LocalDate.parse("2026-01-10"))
 
             assertTrue(state.listening.listenedSeconds > 0)
             assertTrue(state.listening.activity.any { it.value > 0 })

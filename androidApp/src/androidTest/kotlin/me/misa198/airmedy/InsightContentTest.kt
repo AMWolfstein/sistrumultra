@@ -23,7 +23,6 @@ import me.misa198.airmedy.ui.screens.InsightPeriod
 import me.misa198.airmedy.ui.screens.InsightLineChart
 import me.misa198.airmedy.ui.screens.InsightDonut
 import me.misa198.airmedy.ui.screens.InsightPoint
-import me.misa198.airmedy.ui.screens.InsightSourceFilter
 import me.misa198.airmedy.ui.screens.InsightTopTrack
 import me.misa198.airmedy.ui.screens.InsightTopArtist
 import me.misa198.airmedy.ui.screens.InsightUiState
@@ -43,7 +42,6 @@ class InsightContentTest {
     fun insightReplacesPlaceholderAndExposesFiltersAndExpandableTracks() {
         var state by mutableStateOf(
             InsightUiState(
-                hasOtherSources = true,
                 library = LibraryInsightState(tracks = 6),
                 listening = ListeningInsightState(
                     listenedSeconds = 3_600,
@@ -61,7 +59,6 @@ class InsightContentTest {
                     insight = InsightDestinationModel(
                         state = state,
                         onListeningPeriodSelected = { state = state.copy(listeningPeriod = it) },
-                        onSourceSelected = { state = state.copy(sourceFilter = it) },
                     ),
                 ),
             )
@@ -72,12 +69,10 @@ class InsightContentTest {
         val playlistWidth = composeTestRule.onNodeWithTag("insight-playlists").fetchSemanticsNode().boundsInRoot.width
         assertTrue(libraryWidth > playlistWidth)
         composeTestRule.onAllNodesWithText("Insight will appear here.").assertCountEquals(0)
-        composeTestRule.onAllNodesWithText("7D").onLast().performClick()
-        composeTestRule.onNodeWithText("30D").performClick()
+        composeTestRule.onAllNodesWithText("7 Days").onLast().performClick()
+        composeTestRule.onNodeWithText("30 Days").performClick()
         assertEquals(InsightPeriod.ThirtyDays, state.listeningPeriod)
-        composeTestRule.onNodeWithText("All devices").performClick()
-        composeTestRule.onNodeWithText("Other synced devices").performClick()
-        assertEquals(InsightSourceFilter.Other, state.sourceFilter)
+        composeTestRule.onAllNodesWithText("All devices").assertCountEquals(0)
         composeTestRule.onNodeWithText("Artist name").performScrollTo()
         composeTestRule.onNodeWithText("Artist name").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Track 6").assertCountEquals(0)

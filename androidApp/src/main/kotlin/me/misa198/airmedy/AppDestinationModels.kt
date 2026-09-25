@@ -24,7 +24,6 @@ import me.misa198.airmedy.ui.screens.GenreDetailsUiState
 import me.misa198.airmedy.ui.screens.GenreSortOption
 import me.misa198.airmedy.ui.screens.HomeUiState
 import me.misa198.airmedy.ui.screens.InsightPeriod
-import me.misa198.airmedy.ui.screens.InsightSourceFilter
 import me.misa198.airmedy.ui.screens.InsightUiState
 import me.misa198.airmedy.ui.screens.LibraryAlbumsUiState
 import me.misa198.airmedy.ui.screens.LibraryArtistsUiState
@@ -45,7 +44,6 @@ internal data class InsightDestinationModel(
     val state: InsightUiState = InsightUiState(),
     val onLibraryPeriodSelected: (InsightPeriod) -> Unit = {},
     val onListeningPeriodSelected: (InsightPeriod) -> Unit = {},
-    val onSourceSelected: (InsightSourceFilter) -> Unit = {},
     val onTrackClick: (String) -> Unit = {},
 )
 

@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -31,7 +30,6 @@ import me.misa198.airmedy.ui.components.TrackAudioQuality
 import me.misa198.airmedy.ui.components.trackAudioQuality
 
 internal enum class InsightPeriod(val days: Long?) { SevenDays(7), ThirtyDays(30), All(null) }
-internal enum class InsightSourceFilter { All, ThisPhone, Other }
 
 internal data class InsightPoint(val date: String, val value: Int)
 internal data class InsightQuality(val quality: TrackAudioQuality, val count: Int)
@@ -68,8 +66,6 @@ internal data class ListeningInsightState(
 internal data class InsightUiState(
     val libraryPeriod: InsightPeriod = InsightPeriod.SevenDays,
     val listeningPeriod: InsightPeriod = InsightPeriod.SevenDays,
-    val sourceFilter: InsightSourceFilter = InsightSourceFilter.All,
-    val hasOtherSources: Boolean = false,
     val library: LibraryInsightState = LibraryInsightState(),
     val listening: ListeningInsightState = ListeningInsightState(),
 )
@@ -85,46 +81,41 @@ internal data class InsightRawData(
     val library: LibraryBundle,
     val dailyTracks: List<DailyTrackListeningStat>,
     val dailyAttempts: List<DailyPlaybackAttemptStat>,
-    val deviceId: String,
 )
 
 internal class InsightViewModel(
     store: AndroidLibrarySyncStore,
-    deviceId: Flow<String>,
     private val playbackController: PlaybackController,
     private val today: () -> LocalDate = LocalDate::now,
 ) : ViewModel() {
     class Factory(
         private val store: AndroidLibrarySyncStore,
-        private val deviceId: Flow<String>,
         private val playbackController: PlaybackController,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T = InsightViewModel(
             store,
-            deviceId,
             playbackController,
         ) as T
     }
 
     private val libraryPeriod = MutableStateFlow(InsightPeriod.SevenDays)
     private val listeningPeriod = MutableStateFlow(InsightPeriod.SevenDays)
-    private val sourceFilter = MutableStateFlow(InsightSourceFilter.All)
 
     private val library = combine(store.tracks, store.artists, store.albums, store.playlists) { tracks, artists, albums, playlists ->
         LibraryBundle(tracks, artists, albums, playlists)
     }
-    private val raw = combine(library, store.dailyTrackListeningStats, store.dailyPlaybackAttemptStats, deviceId) { library, tracks, attempts, id ->
-        InsightRawData(library, tracks, attempts, id)
+    // Every stored listening record is this phone's: nothing imports other devices' data.
+    private val raw = combine(library, store.dailyTrackListeningStats, store.dailyPlaybackAttemptStats) { library, tracks, attempts ->
+        InsightRawData(library, tracks, attempts)
     }
 
-    val uiState = combine(raw, libraryPeriod, listeningPeriod, sourceFilter) { data, libraryRange, listeningRange, source ->
-        buildInsightUiState(data, libraryRange, listeningRange, source, today())
+    val uiState = combine(raw, libraryPeriod, listeningPeriod) { data, libraryRange, listeningRange ->
+        buildInsightUiState(data, libraryRange, listeningRange, today())
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InsightUiState())
 
     fun setLibraryPeriod(value: InsightPeriod) { libraryPeriod.value = value }
     fun setListeningPeriod(value: InsightPeriod) { listeningPeriod.value = value }
-    fun setSourceFilter(value: InsightSourceFilter) { sourceFilter.value = value }
 
     fun playTopTrack(trackId: String) {
         val tracks = uiState.value.listening.topTracks.map { it.track }
@@ -137,21 +128,13 @@ internal fun buildInsightUiState(
     data: InsightRawData,
     libraryPeriod: InsightPeriod,
     listeningPeriod: InsightPeriod,
-    source: InsightSourceFilter,
     today: LocalDate,
-): InsightUiState {
-    val sourceIds = (data.dailyTracks.map { it.sourceDeviceId } + data.dailyAttempts.map { it.sourceDeviceId }).toSet()
-    val hasOtherSources = sourceIds.any { it != data.deviceId }
-    val effectiveSource = if (source == InsightSourceFilter.Other && !hasOtherSources) InsightSourceFilter.All else source
-    return InsightUiState(
-        libraryPeriod = libraryPeriod,
-        listeningPeriod = listeningPeriod,
-        sourceFilter = effectiveSource,
-        hasOtherSources = hasOtherSources,
-        library = libraryInsights(data.library, libraryPeriod, today),
-        listening = listeningInsights(data, listeningPeriod, effectiveSource, today),
-    )
-}
+): InsightUiState = InsightUiState(
+    libraryPeriod = libraryPeriod,
+    listeningPeriod = listeningPeriod,
+    library = libraryInsights(data.library, libraryPeriod, today),
+    listening = listeningInsights(data, listeningPeriod, today),
+)
 
 private fun libraryInsights(bundle: LibraryBundle, period: InsightPeriod, today: LocalDate): LibraryInsightState {
     val datedTracks = bundle.tracks.mapNotNull { track -> track.createdAt.toLocalDateOrNull()?.let { it to track } }
@@ -184,22 +167,17 @@ private fun libraryInsights(bundle: LibraryBundle, period: InsightPeriod, today:
     )
 }
 
-private fun listeningInsights(data: InsightRawData, period: InsightPeriod, source: InsightSourceFilter, today: LocalDate): ListeningInsightState {
+private fun listeningInsights(data: InsightRawData, period: InsightPeriod, today: LocalDate): ListeningInsightState {
     val start = period.days?.let { today.minusDays(it - 1) }
-    val matchesSource: (String) -> Boolean = { id -> when (source) {
-        InsightSourceFilter.All -> true
-        InsightSourceFilter.ThisPhone -> id == data.deviceId
-        InsightSourceFilter.Other -> id != data.deviceId
-    } }
-    val tracks = data.dailyTracks.filter { matchesSource(it.sourceDeviceId) && (start == null || it.localDate >= start.toString()) }
-    val attempts = data.dailyAttempts.filter { matchesSource(it.sourceDeviceId) && (start == null || it.localDate >= start.toString()) }
+    val tracks = data.dailyTracks.filter { start == null || it.localDate >= start.toString() }
+    val attempts = data.dailyAttempts.filter { start == null || it.localDate >= start.toString() }
     val listenedSeconds = tracks.sumOf { it.listenedSeconds }
     val plays = tracks.sumOf { it.playCount }
     val endedAttempts = attempts.sumOf { it.completed + it.skipped + it.stopped }
     val previous = start?.let { currentStart ->
         val previousStart = currentStart.minusDays(period.days)
         data.dailyTracks.filter {
-            matchesSource(it.sourceDeviceId) && it.localDate >= previousStart.toString() && it.localDate < currentStart.toString()
+            it.localDate >= previousStart.toString() && it.localDate < currentStart.toString()
         }.sumOf { it.listenedSeconds }
     }
     val byDate = tracks.groupBy { it.localDate }.mapValues { (_, rows) -> rows.sumOf { it.listenedSeconds } }
@@ -237,7 +215,7 @@ private fun listeningInsights(data: InsightRawData, period: InsightPeriod, sourc
     val sortedGenres = genreSeconds.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.key })
     val genres = sortedGenres.take(5).map { InsightBreakdown(it.key, it.value) } +
         sortedGenres.drop(5).sumOf { it.value }.takeIf { it > 0 }?.let { listOf(InsightBreakdown("", it, true)) }.orEmpty()
-    val activeDates = data.dailyTracks.filter { matchesSource(it.sourceDeviceId) && it.listenedSeconds > 0 && it.localDate <= today.toString() }.mapTo(mutableSetOf()) { it.localDate }
+    val activeDates = data.dailyTracks.filter { it.listenedSeconds > 0 && it.localDate <= today.toString() }.mapTo(mutableSetOf()) { it.localDate }
     var cursor = if (today.toString() in activeDates) today else today.minusDays(1)
     var streak = 0
     while (cursor.toString() in activeDates) { streak++; cursor = cursor.minusDays(1) }

@@ -10,12 +10,9 @@
     <string name="destination_settings">Impostazioni</string>
     <string name="insight_library_section">Libreria</string>
     <string name="insight_listening_section">Cronologia</string>
-    <string name="insight_range_7d">7G</string>
-    <string name="insight_range_30d">30G</string>
+    <string name="insight_range_7d">7 giorni</string>
+    <string name="insight_range_30d">30 giorni</string>
     <string name="insight_range_all">Tutto</string>
-    <string name="insight_all_devices">Tutti i dispositivi</string>
-    <string name="insight_this_phone">Questo telefono</string>
-    <string name="insight_other_devices">Altri dispositivi</string>
     <string name="insight_library_growth">Crescita libreria</string>
     <string name="insight_audio_quality">Qualità audio</string>
     <string name="insight_library_size">Dimensioni libreria</string>

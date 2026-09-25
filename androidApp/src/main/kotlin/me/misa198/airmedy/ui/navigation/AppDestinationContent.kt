@@ -57,7 +57,6 @@ import me.misa198.airmedy.ui.screens.LibrarySearchContent
 import me.misa198.airmedy.ui.screens.LibrarySearchUiState
 import me.misa198.airmedy.ui.screens.InsightContent
 import me.misa198.airmedy.ui.screens.InsightPeriod
-import me.misa198.airmedy.ui.screens.InsightSourceFilter
 import me.misa198.airmedy.ui.screens.InsightUiState
 import me.misa198.airmedy.ui.screens.SettingsContent
 import me.misa198.airmedy.ui.screens.IntegrationContent
@@ -209,7 +208,6 @@ internal fun AppDestinationContent(
     val onHomeTrackClick = destinations.home.onTrackClick
     val onInsightLibraryPeriodSelected = destinations.insight.onLibraryPeriodSelected
     val onInsightListeningPeriodSelected = destinations.insight.onListeningPeriodSelected
-    val onInsightSourceSelected = destinations.insight.onSourceSelected
     val onInsightTrackClick = destinations.insight.onTrackClick
     val onSortOptionSelected = library.tracks.onSortOptionSelected
     val onToggleSortOrder = library.tracks.onToggleSortOrder
@@ -370,7 +368,6 @@ internal fun AppDestinationContent(
                                 contentPadding = contentPadding,
                                 onLibraryPeriodSelected = onInsightLibraryPeriodSelected,
                                 onListeningPeriodSelected = onInsightListeningPeriodSelected,
-                                onSourceSelected = onInsightSourceSelected,
                                 onArtistClick = { onIntent(AppIntent.OpenArtistDetails(it)) },
                                 onTrackClick = onInsightTrackClick,
                                 modifier = Modifier.fillMaxSize(),
