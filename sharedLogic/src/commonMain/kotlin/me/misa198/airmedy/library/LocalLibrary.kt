@@ -73,6 +73,8 @@ data class LocalTrack(
     val bpm: Int = 0,
     val label: String = "",
     val isrc: String = "",
+    /** The file's content advisory marks it explicit (false when absent or clean). */
+    val explicit: Boolean = false,
     val schemaVersion: Int = 0,
 )
 
@@ -108,6 +110,7 @@ object LocalLibraryJson {
         if (track.bpm > 0) put("bpm", track.bpm)
         if (track.label.isNotBlank()) put("label", track.label)
         if (track.isrc.isNotBlank()) put("isrc", track.isrc)
+        if (track.explicit) put("explicit", true)
         if (track.album.copyright.isNotBlank()) put("copyright", track.album.copyright)
         if (track.schemaVersion > 0) put("schema_version", track.schemaVersion)
         put("artists", buildJsonArray {

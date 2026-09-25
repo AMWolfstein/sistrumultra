@@ -241,6 +241,7 @@
     <string name="track_context_track_info_title">Información de pista</string>
     <string name="track_info_details">DETALLES</string>
     <string name="track_info_quality_lossy">Con pérdidas</string>
+    <string name="track_explicit">Explícito</string>
     <string name="track_info_quality_lossless">Sin pérdidas</string>
     <string name="track_info_quality_hi_res">Hi-Res</string>
     <string name="track_info_quality_dsd">DSD</string>
