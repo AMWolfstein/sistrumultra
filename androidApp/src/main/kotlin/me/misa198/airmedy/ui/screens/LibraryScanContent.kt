@@ -35,6 +35,7 @@ import me.misa198.airmedy.sync.AndroidSyncRuntime
 import me.misa198.airmedy.sync.LocalLibraryScanResult
 import me.misa198.airmedy.sync.MediaStoreLibraryScanner
 import me.misa198.airmedy.sync.ScanFilterPreferences
+import me.misa198.airmedy.sync.TagSeparatorPreferences
 import me.misa198.airmedy.ui.components.ActionList
 import me.misa198.airmedy.ui.components.ActionListContainerStyle
 import me.misa198.airmedy.ui.components.ActionListItem
@@ -55,6 +56,7 @@ internal data class LibraryScanUiState(
 internal fun LibraryScanContent(
     modifier: Modifier = Modifier,
     onScanFilterSelected: () -> Unit = {},
+    onTagSeparatorsSelected: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var uiState by remember { mutableStateOf(LibraryScanUiState()) }
@@ -87,6 +89,7 @@ internal fun LibraryScanContent(
         ActionList(
             items = listOf(
                 ActionListItem(R.string.scan_filter_title, onClick = onScanFilterSelected),
+                ActionListItem(R.string.tag_separators_title, onClick = onTagSeparatorsSelected),
             ),
             containerStyle = ActionListContainerStyle.Card,
         )
@@ -148,22 +151,25 @@ private fun ScanButton(
     )
 }
 
-private fun launchScan(scope: CoroutineScope, context: Context, onResult: (LibraryScanUiState) -> Unit) {
+internal fun launchScan(scope: CoroutineScope, context: Context, onResult: (LibraryScanUiState) -> Unit) {
     scope.launch {
         onResult(LibraryScanUiState(isScanning = true))
         onResult(performScan(context) ?: LibraryScanUiState())
     }
 }
 
-private fun readMediaPermission(): String =
+internal fun readMediaPermission(): String =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO
     else Manifest.permission.READ_EXTERNAL_STORAGE
 
 private suspend fun performScan(context: Context): LibraryScanUiState? = withContext(Dispatchers.IO) {
     runCatching {
+        val separatorPreferences = TagSeparatorPreferences(context)
+        val separators = separatorPreferences.current()
         val scanner = MediaStoreLibraryScanner(
             contentResolver = context.contentResolver,
             artworkDir = File(context.filesDir, "artwork"),
+            separators = separators,
         )
         val syncStore = AndroidSyncRuntime.syncStore()
         val filter = ScanFilterPreferences(context).currentFilter()
@@ -182,6 +188,7 @@ private suspend fun performScan(context: Context): LibraryScanUiState? = withCon
             }
             return@runCatching LibraryScanUiState()
         }
+        separatorPreferences.setAppliedSignature(separators.signature)
         val albums = result.snapshot.tracks.map { it.album.id }.distinct().size
         val artists = result.snapshot.tracks.flatMap { it.artists }.map { it.id }.distinct().size
         LibraryScanUiState(

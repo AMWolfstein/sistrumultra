@@ -102,6 +102,7 @@ private data class AlbumArtworkCandidate(val mediaUri: Uri, val absolutePath: St
 internal class MediaStoreLibraryScanner(
     private val contentResolver: ContentResolver,
     private val artworkDir: File,
+    private val separators: TagSeparatorSettings = TagSeparatorSettings(),
 ) {
     fun scan(
         prior: PriorLibraryScanState = PriorLibraryScanState(),
@@ -289,18 +290,9 @@ internal class MediaStoreLibraryScanner(
         }.getOrDefault(fallback)
     }
 
-    private fun artistsOf(raw: String): List<LocalArtistRef> = raw
-        .split(';')
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .map { name -> LocalArtistRef(id = artistId(name), name = name, sortName = "") }
-        .ifEmpty { listOf(LocalArtistRef(id = artistId(raw), name = raw, sortName = "")) }
+    private fun artistsOf(raw: String): List<LocalArtistRef> = localArtistsOf(raw, separators)
 
-    private fun composersOf(raw: String): List<LocalComposer> = raw
-        .split(';')
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .map { name -> LocalComposer(id = composerId(name), name = name) }
+    private fun composersOf(raw: String): List<LocalComposer> = localComposersOf(raw, separators)
 
     /** MediaStore has no per-track genre projection; read the genre membership table once. */
     private fun genresByTrackId(): Map<Long, List<String>> {
@@ -534,6 +526,20 @@ private val FormatByExtension = mapOf(
  */
 internal fun albumKey(mediaStoreAlbumId: Long?, albumArtist: String, album: String): String =
     mediaStoreAlbumId?.takeIf { it != 0L }?.toString() ?: sha256Hex("$albumArtist|$album").take(12)
+
+/**
+ * Splits an artist (or album artist) tag into artists with the configured delimiters. IDs
+ * come from each resulting name, so "Björk" and "Bjork" still share one artist.
+ */
+internal fun localArtistsOf(raw: String, separators: TagSeparatorSettings): List<LocalArtistRef> =
+    ArtistSeparator.splitArtistNames(raw, separators.delimiters, separators.enabled)
+        .map { name -> LocalArtistRef(id = artistId(name), name = name, sortName = "") }
+        .ifEmpty { listOf(LocalArtistRef(id = artistId(raw), name = raw, sortName = "")) }
+
+/** Splits a composer tag with the same delimiters as artists. */
+internal fun localComposersOf(raw: String, separators: TagSeparatorSettings): List<LocalComposer> =
+    ArtistSeparator.splitArtistNames(raw, separators.delimiters, separators.enabled)
+        .map { name -> LocalComposer(id = composerId(name), name = name) }
 
 internal fun artistId(name: String): String = "local:artist:" + sha256Hex(foldDiacritics(name)).take(16)
 

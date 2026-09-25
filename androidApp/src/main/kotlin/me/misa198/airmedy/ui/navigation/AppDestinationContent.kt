@@ -53,6 +53,7 @@ import me.misa198.airmedy.ui.screens.AppearanceContent
 import me.misa198.airmedy.ui.screens.LibraryContent
 import me.misa198.airmedy.ui.screens.LibraryScanContent
 import me.misa198.airmedy.ui.screens.ScanFilterContent
+import me.misa198.airmedy.ui.screens.TagSeparatorsContent
 import me.misa198.airmedy.ui.screens.LibrarySearchContent
 import me.misa198.airmedy.ui.screens.LibrarySearchUiState
 import me.misa198.airmedy.ui.screens.InsightContent
@@ -408,8 +409,12 @@ internal fun AppDestinationContent(
                             AppStackPage.SettingsScan -> LibraryScanContent(
                                 modifier = settingsPageModifier,
                                 onScanFilterSelected = { onIntent(AppIntent.OpenPage(AppStackPage.SettingsScanFilter)) },
+                                onTagSeparatorsSelected = { onIntent(AppIntent.OpenPage(AppStackPage.SettingsTagSeparators)) },
                             )
                             AppStackPage.SettingsScanFilter -> ScanFilterContent(
+                                modifier = settingsPageModifier,
+                            )
+                            AppStackPage.SettingsTagSeparators -> TagSeparatorsContent(
                                 modifier = settingsPageModifier,
                             )
                             AppStackPage.SettingsPlayback -> PlaybackSettingsContent(
