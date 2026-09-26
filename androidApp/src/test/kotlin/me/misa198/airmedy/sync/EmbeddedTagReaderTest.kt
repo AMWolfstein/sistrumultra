@@ -444,6 +444,40 @@ class EmbeddedTagReaderTest {
         assertEquals(true, EmbeddedTagReader.embeddedTrackTags(file.path)?.explicit)
     }
 
+    // --- One open per read (opening a shared-storage file costs more than reading its tags) ---
+
+    private fun opensDuring(block: () -> Unit): Int {
+        val before = EmbeddedTagReader.fileOpenCount.get()
+        block()
+        return EmbeddedTagReader.fileOpenCount.get() - before
+    }
+
+    @Test fun `every read opens its file exactly once, for every format`() {
+        val files = mapOf(
+            "flac" to flac(picture = image, comments = listOf("LYRICS=$lrc", "ITUNESADVISORY=1")),
+            "opus" to temp("opus-once", oggOpus(vorbisComment(listOf("LYRICS=$lrc", "METADATA_BLOCK_PICTURE=${base64Picture(image)}")))),
+            "vorbis" to temp("vorbis-once", oggVorbis(vorbisComment(listOf("LYRICS=$lrc", "METADATA_BLOCK_PICTURE=${base64Picture(image)}")))),
+            "mp3" to temp("mp3-once", id3v23(frames = tagFrames() + uslt("eng", lrc) + apic(image))),
+            "m4a (moov after mdat)" to m4aMoovAfterMdat(rtng(1) + lyricAtom(lrc) + covr(image)),
+            "wav" to riffWithTrailingId3(bigEndian = false, id3v23(frames = tagFrames() + uslt("eng", lrc) + apic(image))),
+            "aiff" to riffWithTrailingId3(bigEndian = true, id3v23(frames = tagFrames() + apic(image))),
+        )
+        for ((format, file) in files) {
+            assertEquals(1, opensDuring { assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path), format) }, "$format tags")
+            assertEquals(1, opensDuring { EmbeddedTagReader.embeddedLyricsText(file.path) }, "$format lyrics")
+            assertEquals(1, opensDuring { assertNotNull(EmbeddedTagReader.embeddedArtworkBytes(file.path), format) }, "$format artwork")
+        }
+        assertEquals(1, opensDuring { assertEquals(1500L, EmbeddedTagReader.fragmentedMp4DurationMillis(temp("frag-once", fragmentedMp4(timescale = 1000, fragmentDuration = 1500L)).path)) })
+    }
+
+    @Test fun `missing and tiny files read as absent`() {
+        assertNull(EmbeddedTagReader.embeddedTrackTags(File(System.getProperty("java.io.tmpdir"), "no-such-audio-file.flac").path))
+        assertNull(EmbeddedTagReader.embeddedArtworkBytes(File(System.getProperty("java.io.tmpdir"), "no-such-audio-file.flac").path))
+        assertNull(EmbeddedTagReader.embeddedTrackTags(temp("tiny-id3", "ID3".toByteArray()).path))
+        assertNull(EmbeddedTagReader.embeddedLyricsText(temp("tiny-ogg", "OggS".toByteArray()).path))
+        assertNull(EmbeddedTagReader.embeddedTrackTags(temp("empty", ByteArray(0)).path))
+    }
+
     @Test fun `wav id3 chunk artwork and lyrics`() {
         val file = wav(id3v23(frames = listOf(uslt("eng", lrc), apic(image))))
         assertContains(EmbeddedTagReader.embeddedLyricsText(file.path)!!, "Hello world")

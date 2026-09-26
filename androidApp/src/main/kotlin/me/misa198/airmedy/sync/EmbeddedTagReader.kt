@@ -1,7 +1,6 @@
 package me.misa198.airmedy.sync
 
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
 
@@ -95,32 +94,33 @@ internal object EmbeddedTagReader {
     private const val Mp4ReadLimit = 24 * 1024 * 1024
     /** Guard against a corrupt ID3 size field inside a WAV/AIFF chunk. */
     private const val RiffReadLimit = 24 * 1024 * 1024
-    private const val MagicReadLimit = 32 * 1024
+    private const val MagicSize = 12
 
     /** Embedded album-art bytes (front cover when available), or null. */
     fun embeddedArtworkBytes(path: String): ByteArray? = runCatching {
-        val head = readPrefix(path, MagicReadLimit) ?: return null
-        when {
-            head.isFlac() -> flacPicture(readFlacBlocks(path, FlacPicture) ?: return null)
-            head.isId3() -> id3Apic(readId3Tag(path) ?: return null)
-            head.isOgg() -> oggPicture(path)
-            head.isMp4() -> mp4Covr(readTopLevelMp4Box(path, "moov") ?: return null)
-            head.isRiff() || head.isForm() -> riffId3Picture(path)
-            else -> null
+        openForRead(path).use { file ->
+            val head = file.head()
+            when {
+                head.isFlac() -> flacPicture(readFlacBlocks(file, FlacPicture) ?: return null)
+                head.isId3() -> id3Apic(readId3Tag(file) ?: return null)
+                head.isOgg() -> oggPicture(file)
+                head.isMp4() -> mp4Covr(readTopLevelMp4Box(file, "moov") ?: return null)
+                head.isRiff() || head.isForm() -> riffId3Picture(file)
+                else -> null
+            }
         }
     }.getOrNull()
 
     /** Embedded lyrics text (`LYRICS` -> `UNSYNCEDLYRICS` -> `USLT` -> M4A/AIFF), or null. */
     fun embeddedLyricsText(path: String): String? = runCatching {
-        if (id3Magic(path)) {
-            id3Uslt(readId3Tag(path) ?: return null)
-        } else {
-            val head = readPrefix(path, MagicReadLimit) ?: return null
+        openForRead(path).use { file ->
+            val head = file.head()
             when {
-                head.isFlac() -> flacVorbisLyrics(readFlacBlocks(path, FlacVorbisComment) ?: return null)
-                head.isOgg() -> oggVorbisLyrics(path)
-                head.isMp4() -> mp4Lyrics(readTopLevelMp4Box(path, "moov") ?: return null)
-                head.isRiff() || head.isForm() -> riffId3Lyrics(path)
+                head.isId3() -> id3Uslt(readId3Tag(file) ?: return null)
+                head.isFlac() -> flacVorbisLyrics(readFlacBlocks(file, FlacVorbisComment) ?: return null)
+                head.isOgg() -> oggVorbisLyrics(file)
+                head.isMp4() -> mp4Lyrics(readTopLevelMp4Box(file, "moov") ?: return null)
+                head.isRiff() || head.isForm() -> riffId3Lyrics(file)
                 else -> null
             }
         }
@@ -128,29 +128,41 @@ internal object EmbeddedTagReader {
 
     /** Release date/year, BPM, label, ISRC, and copyright read from the file's own tags. */
     fun embeddedTrackTags(path: String): EmbeddedTrackTags? = runCatching {
-        if (id3Magic(path)) {
-            id3ExtractedTags(readId3Tag(path) ?: return null)
-        } else {
-            val head = readPrefix(path, MagicReadLimit) ?: return null
+        openForRead(path).use { file ->
+            val head = file.head()
             when {
-                head.isFlac() -> flacExtractedTags(readFlacBlocks(path, FlacVorbisComment) ?: return null)
-                head.isOgg() -> oggExtractedTags(path)
-                head.isMp4() -> mp4ExtractedTags(readTopLevelMp4Box(path, "moov") ?: return null)
-                head.isRiff() || head.isForm() -> riffExtractedTags(path)
+                head.isId3() -> id3ExtractedTags(readId3Tag(file) ?: return null)
+                head.isFlac() -> flacExtractedTags(readFlacBlocks(file, FlacVorbisComment) ?: return null)
+                head.isOgg() -> oggExtractedTags(file)
+                head.isMp4() -> mp4ExtractedTags(readTopLevelMp4Box(file, "moov") ?: return null)
+                head.isRiff() || head.isForm() -> riffExtractedTags(file)
                 else -> null
             }
         }
     }.getOrNull()
 
-    private fun id3Magic(path: String): Boolean {
-        val file = File(path)
-        if (!file.isFile || file.length() < 10L) return false
-        val head = runCatching { file.inputStream().use { readUpTo(it, 10) } }.getOrNull() ?: return false
-        return head.isId3()
+    /** Test-only: how many files [openForRead] has opened. */
+    internal val fileOpenCount = java.util.concurrent.atomic.AtomicInteger()
+
+    /**
+     * Each public read opens its file once and hands the open file to format detection
+     * and the format's reader. Opening a file under shared storage (FUSE) costs several
+     * milliseconds, far more than reading its tags, so it must not be repeated per step.
+     */
+    private fun openForRead(path: String): RandomAccessFile =
+        RandomAccessFile(path, "r").also { fileOpenCount.incrementAndGet() }
+
+    /** The first bytes of the file, enough for every magic check below (12). */
+    private fun RandomAccessFile.head(): ByteArray {
+        seek(0)
+        val head = ByteArray(minOf(MagicSize.toLong(), length()).toInt())
+        readFully(head)
+        return head
     }
 
     /** The leading ID3v2 tag, read at the size its header declares (capped by [Id3ReadLimit]). */
-    private fun readId3Tag(path: String): ByteArray? = RandomAccessFile(path, "r").use { file ->
+    private fun readId3Tag(file: RandomAccessFile): ByteArray? = run {
+        file.seek(0)
         val length = file.length()
         if (length < 10L) return null
         val header = ByteArray(10)
@@ -160,13 +172,6 @@ internal object EmbeddedTagReader {
         file.seek(0)
         file.readFully(bytes)
         bytes
-    }
-
-    private fun readPrefix(path: String, limit: Int): ByteArray? {
-        val file = File(path)
-        val length = file.length()
-        if (length <= 0L) return null
-        return file.inputStream().use { input -> readUpTo(input, minOf(limit, length.toInt())) }
     }
 
     /** Loops raw reads so bounded prefix reads work on every supported API level. */
@@ -189,10 +194,11 @@ internal object EmbeddedTagReader {
      * so padding, seek tables and other large blocks before them are skipped, not read.
      * A block that would take the total past [FlacReadLimit] is skipped.
      */
-    private fun readFlacBlocks(path: String, type: Int): ByteArray? = RandomAccessFile(path, "r").use { file ->
+    private fun readFlacBlocks(file: RandomAccessFile, type: Int): ByteArray? = run {
         val length = file.length()
         val header = ByteArray(4)
         if (length < 8L) return null
+        file.seek(0)
         file.readFully(header)
         if (!header.isFlac()) return null
         val out = ByteArrayOutputStream()
@@ -310,11 +316,11 @@ internal object EmbeddedTagReader {
 
     // ---------------------------------------------------------------- OGG
 
-    private fun oggVorbisLyrics(path: String): String? = oggVorbisComment(path, wantPicture = false)?.let { it.lyrics ?: it.unsynced }
+    private fun oggVorbisLyrics(file: RandomAccessFile): String? = oggVorbisComment(file, wantPicture = false)?.let { it.lyrics ?: it.unsynced }
 
-    private fun oggPicture(path: String): ByteArray? = oggVorbisComment(path, wantPicture = true)?.picture
+    private fun oggPicture(file: RandomAccessFile): ByteArray? = oggVorbisComment(file, wantPicture = true)?.picture
 
-    private fun oggExtractedTags(path: String): EmbeddedTrackTags? = oggVorbisComment(path, wantPicture = false)?.tags?.toVorbisExtractedTags()
+    private fun oggExtractedTags(file: RandomAccessFile): EmbeddedTrackTags? = oggVorbisComment(file, wantPicture = false)?.tags?.toVorbisExtractedTags()
 
     /**
      * Parses the comment header of an Opus ("OpusHead" + "OpusTags") or Vorbis
@@ -325,8 +331,11 @@ internal object EmbeddedTagReader {
      * Picture entries (almost all of a typical packet) are decoded only when
      * [wantPicture] is set.
      */
-    private fun oggVorbisComment(path: String, wantPicture: Boolean): VorbisComment? {
-        val (identification, comment) = File(path).inputStream().buffered().use { oggHeaderPackets(it) } ?: return null
+    private fun oggVorbisComment(file: RandomAccessFile, wantPicture: Boolean): VorbisComment? {
+        // Reads through the already-open file; closing the stream also closes the file,
+        // which the caller would do next anyway.
+        val input = java.nio.channels.Channels.newInputStream(file.channel.position(0)).buffered()
+        val (identification, comment) = input.use { oggHeaderPackets(it) } ?: return null
         val magicSize = when {
             identification.startsWith(OpusHeadMagic) && comment.startsWith(OpusTagsMagic) -> OpusTagsMagic.size
             identification.startsWith(VorbisIdMagic) && comment.startsWith(VorbisCommentMagic) -> VorbisCommentMagic.size
@@ -664,18 +673,19 @@ internal object EmbeddedTagReader {
      * file is not MP4 or has no `mehd`.
      */
     fun fragmentedMp4DurationMillis(path: String): Long? = runCatching {
-        val head = readPrefix(path, MagicReadLimit) ?: return null
-        if (!head.isMp4()) return null
-        // TODO: a fragmented file without mehd could fall back to summing the
-        // moof > traf > trun sample durations; no such file has turned up yet.
-        readTopLevelMp4Box(path, "moov")?.mehdDurationMillis()
+        openForRead(path).use { file ->
+            if (!file.head().isMp4()) return null
+            // TODO: a fragmented file without mehd could fall back to summing the
+            // moof > traf > trun sample durations; no such file has turned up yet.
+            readTopLevelMp4Box(file, "moov")?.mehdDurationMillis()
+        }
     }.getOrNull()
 
     /** Payload of the first top-level box of [type], found by walking box headers only,
      *  so `mdat` and any `moof` fragments are skipped, not read. This finds `moov`
      *  wherever it sits: at the front of fast-start files or after `mdat` in the rest. */
-    private fun readTopLevelMp4Box(path: String, type: String): ByteArray? =
-        java.io.RandomAccessFile(path, "r").use { file ->
+    private fun readTopLevelMp4Box(file: RandomAccessFile, type: String): ByteArray? =
+        run {
             val length = file.length()
             val header = ByteArray(16)
             var pos = 0L
@@ -736,10 +746,11 @@ internal object EmbeddedTagReader {
      * chunk usually follows the audio `data`/`SSND` chunk, so chunk headers are walked
      * by seeking past each body; only the ID3 tag itself is read, at its declared size.
      */
-    private fun readRiffId3Tag(path: String): ByteArray? = RandomAccessFile(path, "r").use { file ->
+    private fun readRiffId3Tag(file: RandomAccessFile): ByteArray? = run {
         val length = file.length()
         val header = ByteArray(12)
         if (length < 12L) return null
+        file.seek(0)
         file.readFully(header)
         val bigEndian = header.isForm() // AIFF is big-endian; WAV is little-endian.
         var pos = 12L
@@ -767,11 +778,11 @@ internal object EmbeddedTagReader {
         null
     }
 
-    private fun riffId3Picture(path: String): ByteArray? = readRiffId3Tag(path)?.let { id3Apic(it) }
+    private fun riffId3Picture(file: RandomAccessFile): ByteArray? = readRiffId3Tag(file)?.let { id3Apic(it) }
 
-    private fun riffId3Lyrics(path: String): String? = readRiffId3Tag(path)?.let { id3Uslt(it) }
+    private fun riffId3Lyrics(file: RandomAccessFile): String? = readRiffId3Tag(file)?.let { id3Uslt(it) }
 
-    private fun riffExtractedTags(path: String): EmbeddedTrackTags? = readRiffId3Tag(path)?.let { id3ExtractedTags(it) }
+    private fun riffExtractedTags(file: RandomAccessFile): EmbeddedTrackTags? = readRiffId3Tag(file)?.let { id3ExtractedTags(it) }
 
     // ---------------------------------------------------------------- ID3v2
 
