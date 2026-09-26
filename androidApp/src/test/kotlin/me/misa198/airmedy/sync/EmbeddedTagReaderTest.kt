@@ -192,6 +192,126 @@ class EmbeddedTagReaderTest {
         assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
     }
 
+    // --- Tags-only Ogg reads stream the comment packet and skip picture bytes ---
+
+    private fun le32(value: Int): ByteArray = bytesOf { writeIntLE(value) }
+
+    /** A comment block from raw entries, with optional overrides for malformed fixtures. */
+    private fun rawComment(entries: List<ByteArray>, count: Int = entries.size, vendorLength: Int? = null, lengths: Map<Int, Int> = emptyMap()): ByteArray =
+        bytesOf {
+            val vendor = "test vendor".toByteArray()
+            write(le32(vendorLength ?: vendor.size)); write(vendor); write(le32(count))
+            entries.forEachIndexed { index, entry -> write(le32(lengths[index] ?: entry.size)); write(entry) }
+        }
+
+    private fun opusFile(name: String, comment: ByteArray, maxSegmentsPerPage: Int = 16, padding: Int = 0): File {
+        val tags = "OpusTags".toByteArray(Charsets.US_ASCII) + comment + ByteArray(padding)
+        val audio = List(8) { ByteArray(160) { i -> (i * 31 + it).toByte() } }
+        return temp(name, oggPages(listOf(opusHead(), tags) + audio, maxSegmentsPerPage = maxSegmentsPerPage, pageStarts = setOf(1, 2))
+            .fold(ByteArray(0)) { acc, page -> acc + page })
+    }
+
+    private fun coverComments(front: ByteArray, back: ByteArray) = listOf(
+        "DATE=2024-06-12", "ISRC=EGA012400123", "LYRICS=$lrc",
+        "METADATA_BLOCK_PICTURE=${base64Picture(front)}", "METADATA_BLOCK_PICTURE=${base64Picture(back, pictureType = 4)}",
+        "ITUNESADVISORY=1", "LABEL=\u0645\u0632\u064A\u0643\u0627", "COPYRIGHT=\u2117 2024",
+    )
+
+    /** Every fixture layout the tags path must read exactly as the reassembling parser does. */
+    private fun equivalenceFixtures(): Map<String, File> {
+        val entries = listOf(
+            "NOEQUALS", "=novalue", "", " metadata_block_picture =not a picture", "lyrics=first", "LYRICS=second",
+            "SYNCEDLYRICS=synced", "UNSYNCEDLYRICS=plain", "DATE=1999", "DATE=2000", "  Label  =\uC548\uB155 \u0645\u0631\u062D\u0628\u0627",
+            "K".repeat(100) + "=long key", "ITUNESADVISORY=1",
+        ).map { it.toByteArray(Charsets.UTF_8) }
+        val manyPageLyrics = lrcOfLength(6531 - "LYRICS=".length)
+        val manyPage = vorbisComment(listOf(filler("COPYRIGHT", 27), "DATE=2024-06-12", "LYRICS=$manyPageLyrics",
+            "METADATA_BLOCK_PICTURE=" + base64Picture(imageOfSize(75_247, seed = 1)),
+            "METADATA_BLOCK_PICTURE=" + base64Picture(imageOfSize(418_458, seed = 2), pictureType = 4), filler("TITLE", 16)),
+            vendor = "libopus 1.6, libopusenc 0.3")
+        val covers = vorbisComment(coverComments(imageOfSize(20_000, seed = 5), imageOfSize(60_000, seed = 6)))
+        val multiplexed = run {
+            val pages = oggPages(listOf(opusHead(), "OpusTags".toByteArray(Charsets.US_ASCII) + covers), maxSegmentsPerPage = 16)
+            val foreign = oggPages(listOf(ByteArray(300) { 7 }), serial = 0x0BADF00D, maxSegmentsPerPage = 16).single()
+            temp("opus-eq-multiplexed", (pages.take(3) + foreign + pages.drop(3)).fold(ByteArray(0)) { acc, page -> acc + page })
+        }
+        val coversFile = opusFile("opus-eq-covers", covers)
+        return mapOf(
+            "two covers, tags before and after" to twoCoverOpus.second,
+            "header spanning many pages" to opusFile("opus-eq-manypage", manyPage, padding = 10_412),
+            "one segment per page (keys and lengths split across pages)" to opusFile("opus-eq-tiny", covers, maxSegmentsPerPage = 1),
+            "three segments per page" to opusFile("opus-eq-three", rawComment(entries), maxSegmentsPerPage = 3),
+            "another stream's pages mixed in" to multiplexed,
+            "trailing padding" to opusFile("opus-eq-padding", covers, padding = 5_000),
+            "vorbis stream with a picture" to temp("vorbis-eq", oggVorbis(covers)),
+            "malformed and duplicate entries" to opusFile("opus-eq-malformed", rawComment(entries)),
+            "entry length past the packet end" to opusFile("opus-eq-overrun", rawComment(entries.take(6), lengths = mapOf(4 to 1_000_000))),
+            "negative entry length" to opusFile("opus-eq-negative", rawComment(entries.take(6), lengths = mapOf(4 to -1))),
+            "count above the entries present" to opusFile("opus-eq-count", rawComment(entries.take(4), count = 50)),
+            "vendor length past the packet end" to opusFile("opus-eq-vendor", rawComment(entries, vendorLength = 1_000_000)),
+            "comment block too short" to opusFile("opus-eq-short", byteArrayOf(1, 0, 0)),
+            "truncated inside a picture" to temp("opus-eq-cut-picture", coversFile.readBytes().let { it.copyOf(it.size / 2) }),
+            "truncated in the audio after the header" to temp("opus-eq-cut-audio", coversFile.readBytes().let { it.copyOf(it.size - 300) }),
+            "not an Opus or Vorbis stream" to temp("ogg-eq-other", oggPages(listOf("FishHead".toByteArray() + ByteArray(40), "OpusTags".toByteArray() + covers), maxSegmentsPerPage = 16).fold(ByteArray(0)) { acc, page -> acc + page }),
+        )
+    }
+
+    @Test fun `tags-only ogg reads equal the reassembling parser on every fixture`() {
+        var parsed = 0
+        for ((name, file) in equivalenceFixtures()) {
+            val streamed = EmbeddedTagReader.oggCommentTextForTest(file.path, streaming = true)
+            val reassembled = EmbeddedTagReader.oggCommentTextForTest(file.path, streaming = false)
+            assertEquals(reassembled, streamed, name)
+            if (reassembled != null) parsed++
+        }
+        // Guard against a vacuous pass: all but the four unreadable fixtures (vendor overrun,
+        // short block, cut inside a picture, not Opus/Vorbis) parse.
+        assertEquals(12, parsed)
+    }
+
+    @Test fun `tags-only ogg reads handle the malformed entries like the reassembling parser`() {
+        val (lyrics, unsynced, tags) = assertNotNull(EmbeddedTagReader.oggCommentTextForTest(equivalenceFixtures().getValue("malformed and duplicate entries").path, streaming = true))
+        assertEquals("first", lyrics)
+        assertEquals("plain", unsynced)
+        assertEquals("1999", tags["DATE"])
+        assertEquals("\uC548\uB155 \u0645\u0631\u062D\u0628\u0627", tags["LABEL"])
+        assertEquals("long key", tags["K".repeat(100)])
+        assertTrue("METADATA_BLOCK_PICTURE" !in tags)
+    }
+
+    @Test fun `opus artwork reads return the exact cover bytes`() {
+        val (front, file) = twoCoverOpus
+        assertEquals(front.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+        val tinyPages = equivalenceFixtures().getValue("one segment per page (keys and lengths split across pages)")
+        assertEquals(imageOfSize(20_000, seed = 5).toList(), EmbeddedTagReader.embeddedArtworkBytes(tinyPages.path)!!.toList())
+        val backOnlyFront = opusFile("opus-back-first", vorbisComment(listOf(
+            "METADATA_BLOCK_PICTURE=${base64Picture(imageOfSize(30_000, seed = 8), pictureType = 4)}",
+            "METADATA_BLOCK_PICTURE=${base64Picture(imageOfSize(40_000, seed = 9))}",
+        )))
+        // Unchanged artwork rule: the first picture is returned, whatever its type.
+        assertEquals(imageOfSize(30_000, seed = 8).toList(), EmbeddedTagReader.embeddedArtworkBytes(backOnlyFront.path)!!.toList())
+    }
+
+    @Test fun `tags-only ogg reads copy no picture bytes`() {
+        fun copiedFor(front: ByteArray, back: ByteArray): Long {
+            val file = opusFile("opus-copies", vorbisComment(coverComments(front, back)))
+            val before = EmbeddedTagReader.oggTextBytesCopied.get()
+            assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+            assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
+            return EmbeddedTagReader.oggTextBytesCopied.get() - before
+        }
+        val small = copiedFor(imageOfSize(7_500, seed = 21), imageOfSize(42_000, seed = 22))
+        val large = copiedFor(imageOfSize(75_247, seed = 23), imageOfSize(418_458, seed = 24))
+        assertEquals(small, large, "bytes copied must not depend on the picture sizes")
+        // Per read (tags, then lyrics): the text entries, every entry's 4-byte length, the
+        // 24-byte key chunk of each picture, the 8-byte identification prefix and magic,
+        // and the vendor length and entry count.
+        val comments = coverComments(ByteArray(0), ByteArray(0))
+        val textBytes = comments.filterNot { it.startsWith("METADATA") }.sumOf { it.toByteArray().size }
+        val perRead = textBytes + 4 * comments.size + 2 * 24 + 8 + 8 + 4 + 4
+        assertEquals(2L * perRead, large)
+    }
+
     @Test fun `ogg pages from another multiplexed stream are skipped`() {
         val lyrics = lrcOfLength(10_000)
         val pages = oggPages(

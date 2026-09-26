@@ -316,11 +316,11 @@ internal object EmbeddedTagReader {
 
     // ---------------------------------------------------------------- OGG
 
-    private fun oggVorbisLyrics(file: RandomAccessFile): String? = oggVorbisComment(file, wantPicture = false)?.let { it.lyrics ?: it.unsynced }
+    private fun oggVorbisLyrics(file: RandomAccessFile): String? = oggCommentText(file)?.let { it.lyrics ?: it.unsynced }
 
     private fun oggPicture(file: RandomAccessFile): ByteArray? = oggVorbisComment(file, wantPicture = true)?.picture
 
-    private fun oggExtractedTags(file: RandomAccessFile): EmbeddedTrackTags? = oggVorbisComment(file, wantPicture = false)?.tags?.toVorbisExtractedTags()
+    private fun oggExtractedTags(file: RandomAccessFile): EmbeddedTrackTags? = oggCommentText(file)?.tags?.toVorbisExtractedTags()
 
     /**
      * Parses the comment header of an Opus ("OpusHead" + "OpusTags") or Vorbis
@@ -442,6 +442,224 @@ internal object EmbeddedTagReader {
             }
         }
         return VorbisComment(lyrics, unsynced, picture, tags)
+    }
+
+    /**
+     * Text entries of an Ogg Opus/Vorbis comment header, for tags and lyrics. Unlike
+     * [oggVorbisComment] (the artwork path) the comment packet is never reassembled:
+     * [OggCommentTextReader] parses it straight from the page stream and skips
+     * `METADATA_BLOCK_PICTURE` entries (almost all of a typical packet) without copying
+     * them. Page walking, guards and entry handling match [oggHeaderPackets] and
+     * [vorbisComment], so the result equals `oggVorbisComment(path, false)`.
+     */
+    private fun oggCommentText(file: RandomAccessFile): VorbisComment? {
+        val input = java.nio.channels.Channels.newInputStream(file.channel.position(0)).buffered()
+        return input.use { OggCommentTextReader(it, file.length()).read() }
+    }
+
+    /** Test-only: bytes the tags-only Ogg path copied out of the header packets. */
+    internal val oggTextBytesCopied = java.util.concurrent.atomic.AtomicLong()
+
+    /** Test-only: an Ogg file's comment text through the streaming tags path, or through
+     *  the full reassembly that the artwork path uses, for comparing the two. */
+    internal fun oggCommentTextForTest(path: String, streaming: Boolean): Triple<String?, String?, Map<String, String>>? =
+        openForRead(path).use { file -> if (streaming) oggCommentText(file) else oggVorbisComment(file, wantPicture = false) }
+            ?.let { Triple(it.lyrics, it.unsynced, it.tags) }
+
+    /**
+     * Reads the first two packets of the file's first logical Ogg stream as a byte stream
+     * that continues across pages, without assembling them. Pages are validated as
+     * [oggHeaderPackets] does: `OggS` header, full segment table, the [OggReadLimit]
+     * budget counted per page, the whole body present in the file, and other streams'
+     * pages skipped. Skipped bytes are passed over with [InputStream.skip], never copied.
+     */
+    private class OggCommentTextReader(private val input: InputStream, private val fileLength: Long) {
+        private var position = 0L
+        private var consumed = 0L
+        private var serial: Int? = null
+        private var segments = IntArray(0)
+        private var segmentIndex = 0
+        private var segmentRemaining = 0
+        private var lastLacing = 255
+        private var pageBodyRemaining = 0
+        /** Set when the page stream is malformed, truncated or over budget: the result is null. */
+        private var failed = false
+
+        fun read(): VorbisComment? {
+            val identification = readPacketPrefix(8) ?: return null
+            if (!skipRestOfPacket()) return null
+            val commentMagic = when {
+                identification.startsWith(OpusHeadMagic) -> OpusTagsMagic
+                identification.startsWith(VorbisIdMagic) -> VorbisCommentMagic
+                else -> return null
+            }
+            startPacket()
+            val magic = readInPacket(commentMagic.size) ?: return null
+            if (!magic.startsWith(commentMagic)) return null
+            val comment = parseComment()
+            // As with the reassembled packet, the comment header must complete.
+            if (!skipRestOfPacket()) return null
+            return comment
+        }
+
+        /** Mirrors [vorbisComment] over the packet stream; null where it returns null. */
+        private fun parseComment(): VorbisComment? {
+            val vendorLength = readIntLE() ?: return null
+            if (vendorLength < 0 || skipInPacket(vendorLength.toLong()) < vendorLength) return null
+            val count = (readIntLE() ?: return null).coerceIn(0, 4096)
+            var lyrics: String? = null
+            var unsynced: String? = null
+            val tags = linkedMapOf<String, String>()
+            for (index in 0 until count) {
+                val length = readIntLE() ?: break
+                if (length < 0) break
+                // The key runs up to the first '='. The first chunk holds "METADATA_BLOCK_PICTURE="
+                // (23 bytes), so a picture entry costs one byte of its payload.
+                var head = ByteArray(0)
+                var equals = -1
+                while (equals < 0 && head.size < length) {
+                    val chunkSize = if (head.isEmpty()) 24 else 64
+                    val chunk = readInPacket(minOf(chunkSize, length - head.size)) ?: return VorbisComment(lyrics, unsynced, null, tags)
+                    val searchFrom = head.size
+                    head += chunk
+                    equals = head.indexOfByte('='.code.toByte(), searchFrom, head.size)
+                }
+                if (equals <= 0) {
+                    if (skipInPacket((length - head.size).toLong()) < length - head.size) break
+                    continue
+                }
+                val key = String(head, 0, equals, Charsets.ISO_8859_1).trim().uppercase()
+                if (key == "METADATA_BLOCK_PICTURE") {
+                    if (skipInPacket((length - head.size).toLong()) < length - head.size) break
+                    continue
+                }
+                val rest = readInPacket(length - head.size) ?: break
+                val value = head.copyOfRange(equals + 1, head.size) + rest
+                val entryValue = String(value, Charsets.UTF_8)
+                when (key) {
+                    "LYRICS", "SYNCEDLYRICS" -> if (lyrics == null) lyrics = entryValue
+                    "UNSYNCEDLYRICS" -> if (unsynced == null) unsynced = entryValue
+                }
+                if (key.isNotEmpty() && key !in tags) tags[key] = entryValue
+            }
+            return VorbisComment(lyrics, unsynced, null, tags)
+        }
+
+        private fun readIntLE(): Int? = readInPacket(4)?.readUInt32LE(0)
+
+        /** Up to [limit] leading bytes of the current packet (fewer if it is shorter). */
+        private fun readPacketPrefix(limit: Int): ByteArray? {
+            val out = ByteArray(limit)
+            var total = 0
+            while (total < limit && available()) total += copy(out, total, limit - total)
+            return if (failed) null else out.copyOf(total)
+        }
+
+        /** Exactly [count] bytes of the current packet, or null if it ends first. */
+        private fun readInPacket(count: Int): ByteArray? {
+            val out = ByteArray(count)
+            var total = 0
+            while (total < count) {
+                if (!available()) return null
+                total += copy(out, total, count - total)
+            }
+            return out
+        }
+
+        /** Skips up to [count] bytes of the current packet; returns how many were skipped. */
+        private fun skipInPacket(count: Long): Long {
+            var skipped = 0L
+            while (skipped < count && available()) {
+                val step = minOf(count - skipped, segmentRemaining.toLong()).toInt()
+                if (!skipFully(step)) return skipped
+                segmentRemaining -= step
+                pageBodyRemaining -= step
+                skipped += step
+            }
+            return skipped
+        }
+
+        /** Skips to the end of the current packet; false if the stream fails first. */
+        private fun skipRestOfPacket(): Boolean {
+            while (available()) skipInPacket(segmentRemaining.toLong())
+            return !failed
+        }
+
+        private fun startPacket() {
+            lastLacing = 255
+        }
+
+        private fun copy(out: ByteArray, offset: Int, max: Int): Int {
+            val count = minOf(max, segmentRemaining)
+            var total = 0
+            while (total < count) {
+                val read = input.read(out, offset + total, count - total)
+                if (read < 0) {
+                    failed = true
+                    segmentRemaining = 0
+                    return 0
+                }
+                total += read
+            }
+            position += count
+            segmentRemaining -= count
+            pageBodyRemaining -= count
+            oggTextBytesCopied.addAndGet(count.toLong())
+            return count
+        }
+
+        /** True while the current packet has bytes left; moves on to the next segment or page. */
+        private fun available(): Boolean {
+            while (!failed) {
+                if (segmentRemaining > 0) return true
+                if (lastLacing < 255) return false
+                if (segmentIndex >= segments.size) {
+                    if (!nextPage()) failed = true
+                    continue
+                }
+                lastLacing = segments[segmentIndex++]
+                segmentRemaining = lastLacing
+            }
+            return false
+        }
+
+        private fun nextPage(): Boolean {
+            if (pageBodyRemaining > 0 && !skipFully(pageBodyRemaining)) return false
+            while (true) {
+                val header = readUpTo(input, OggPageHeaderSize)
+                position += header.size
+                if (header.size < OggPageHeaderSize || !header.isOgg()) return false
+                val segmentCount = header[26].toInt() and 0xFF
+                val table = readUpTo(input, segmentCount)
+                position += table.size
+                if (table.size < segmentCount) return false
+                val bodySize = table.sumOf { it.toInt() and 0xFF }
+                consumed += OggPageHeaderSize + segmentCount + bodySize
+                if (consumed > OggReadLimit) return false
+                if (position + bodySize > fileLength) return false
+                val pageSerial = header.readUInt32LE(14)
+                if (serial == null) serial = pageSerial
+                if (pageSerial != serial) {
+                    if (!skipFully(bodySize)) return false
+                    continue
+                }
+                segments = IntArray(segmentCount) { table[it].toInt() and 0xFF }
+                segmentIndex = 0
+                pageBodyRemaining = bodySize
+                return true
+            }
+        }
+
+        private fun skipFully(count: Int): Boolean {
+            var remaining = count.toLong()
+            while (remaining > 0) {
+                val skipped = input.skip(remaining)
+                if (skipped <= 0) return false
+                remaining -= skipped
+            }
+            position += count
+            return true
+        }
     }
 
     /** Vorbis-comment DATE/YEAR (FLAC/OGG/Opus) -> the shared [EmbeddedTrackTags]. */
