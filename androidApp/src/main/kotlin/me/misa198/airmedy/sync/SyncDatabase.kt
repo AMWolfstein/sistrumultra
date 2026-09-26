@@ -819,6 +819,7 @@ internal class AndroidLibrarySyncStore(
                 isrc = json.string("isrc").orEmpty(),
                 copyright = json.string("copyright").orEmpty(),
                 explicit = json.string("explicit") == "true",
+                codec = json.string("codec").orEmpty(),
             )
         }.toMap()
         val artworkByArtworkKey = dao.activeArtworkScanState().associate { row ->

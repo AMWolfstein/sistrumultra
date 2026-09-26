@@ -72,6 +72,8 @@ internal data class PriorTrackScanState(
     val isrc: String,
     val copyright: String,
     val explicit: Boolean = false,
+    /** The codec [MediaStoreLibraryScanner] sniffed for this file (see realCodec). */
+    val codec: String = "",
 )
 
 /** A previously copied album artwork file, read back so unchanged albums skip
@@ -215,7 +217,9 @@ internal class MediaStoreLibraryScanner(
                     bitrate = number(ColumnBitrate)?.toInt() ?: 0,
                     sampleRate = number(ColumnSampleRate)?.toInt() ?: 0,
                     bitDepth = number(ColumnBitsPerSample)?.toInt() ?: 0,
-                    codec = realCodec(format, mime, data),
+                    // Sniffing an M4A's codec opens the file with MediaExtractor; an
+                    // unchanged file keeps the codec found last time.
+                    codec = reusableCodec(priorTrack, newIdentityHash) ?: realCodec(format, mime, data),
                     fileSize = size,
                     releaseDate = releaseDate,
                     bpm = bpm,
@@ -471,6 +475,10 @@ internal class MediaStoreLibraryScanner(
         val ArtworkTargetSize = Size(1024, 1024)
     }
 }
+
+/** The codec found when [prior] was scanned, if the file is byte-for-byte the same one. */
+internal fun reusableCodec(prior: PriorTrackScanState?, identityHash: String): String? =
+    prior?.codec?.takeIf { prior.identityHash == identityHash && it.isNotBlank() }
 
 /**
  * A MediaStore tag column's value, or null when the file has no such tag. MediaStore

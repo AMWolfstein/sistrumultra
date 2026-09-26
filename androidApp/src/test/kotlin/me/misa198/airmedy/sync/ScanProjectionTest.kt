@@ -74,4 +74,16 @@ class ScanProjectionTest {
             queryWithAudioFormatFallback(includeAudioFormatColumns = true) { throw IllegalArgumentException("still bad") }
         }
     }
+
+    private fun prior(hash: String, codec: String) = PriorTrackScanState(hash, 6, 0, "", 0, "", "", "", codec = codec)
+
+    @Test fun `an unchanged file reuses its previously sniffed codec`() {
+        assertEquals("alac", reusableCodec(prior("h1", "alac"), "h1"))
+    }
+
+    @Test fun `a changed, new or never-sniffed file sniffs its codec again`() {
+        assertEquals(null, reusableCodec(prior("h1", "alac"), "h2"))
+        assertEquals(null, reusableCodec(null, "h1"))
+        assertEquals(null, reusableCodec(prior("h1", ""), "h1"))
+    }
 }
