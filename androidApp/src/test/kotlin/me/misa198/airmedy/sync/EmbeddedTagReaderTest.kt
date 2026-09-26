@@ -151,6 +151,47 @@ class EmbeddedTagReaderTest {
         assertEquals(cover.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
     }
 
+    /** Laid out like the device's SpotiFLAC Opus files: text tags, two large covers
+     *  (98.8% of a real packet), then more text tags after the pictures. */
+    private val twoCoverOpus by lazy {
+        val front = imageOfSize(75_247, seed = 11)
+        val back = imageOfSize(418_458, seed = 12)
+        val comments = listOf(
+            "DATE=2024-06-12", "ISRC=EGA012400123", "LYRICS=$lrc",
+            "METADATA_BLOCK_PICTURE=${base64Picture(front)}", "METADATA_BLOCK_PICTURE=${base64Picture(back, pictureType = 4)}",
+            "ITUNESADVISORY=1", "LABEL=\u0645\u0632\u064A\u0643\u0627", "COPYRIGHT=\u2117 2024",
+        )
+        front to temp("opus-two-covers", oggOpus(vorbisComment(comments)))
+    }
+
+    @Test fun `opus tags and lyrics reads do not decode the pictures, artwork reads decode one`() {
+        val (_, file) = twoCoverOpus
+        val before = EmbeddedTagReader.pictureDecodeCount.get()
+        EmbeddedTagReader.embeddedTrackTags(file.path)
+        EmbeddedTagReader.embeddedLyricsText(file.path)
+        assertEquals(before, EmbeddedTagReader.pictureDecodeCount.get())
+        EmbeddedTagReader.embeddedArtworkBytes(file.path)
+        assertEquals(before + 1, EmbeddedTagReader.pictureDecodeCount.get())
+    }
+
+    @Test fun `opus tag lyrics and artwork values are unchanged when pictures are skipped`() {
+        val (front, file) = twoCoverOpus
+        val tags = assertNotNull(EmbeddedTagReader.embeddedTrackTags(file.path))
+        assertEquals("2024-06-12", tags.releaseDate)
+        assertEquals(2024, tags.year)
+        assertEquals("EGA012400123", tags.isrc)
+        assertEquals(true, tags.explicit) // written after both pictures
+        assertEquals("\u0645\u0632\u064A\u0643\u0627", tags.label)
+        assertEquals("\u2117 2024", tags.copyright)
+        assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
+        assertEquals(front.toList(), EmbeddedTagReader.embeddedArtworkBytes(file.path)!!.toList())
+    }
+
+    @Test fun `vorbis entries without a key or equals sign are skipped`() {
+        val file = flac(picture = null, comments = listOf("NOEQUALS", "=novalue", "LYRICS=$lrc"))
+        assertEquals(lrc, EmbeddedTagReader.embeddedLyricsText(file.path))
+    }
+
     @Test fun `ogg pages from another multiplexed stream are skipped`() {
         val lyrics = lrcOfLength(10_000)
         val pages = oggPages(

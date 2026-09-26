@@ -278,7 +278,7 @@ internal object EmbeddedTagReader {
             val payloadStart = offset + 4
             val payloadEnd = payloadStart + length
             if (payloadEnd > bytes.size) return null
-            if (type == 4) bytes.copyOfRange(payloadStart, payloadEnd).vorbisComment()?.let {
+            if (type == 4) bytes.vorbisComment(payloadStart, payloadEnd, wantPicture = false)?.let {
                 return it.lyrics ?: it.unsynced
             }
             if (last) return null
@@ -298,7 +298,7 @@ internal object EmbeddedTagReader {
             val payloadStart = offset + 4
             val payloadEnd = payloadStart + length
             if (payloadEnd > bytes.size) return null
-            if (type == 4) bytes.copyOfRange(payloadStart, payloadEnd).vorbisComment()?.let {
+            if (type == 4) bytes.vorbisComment(payloadStart, payloadEnd, wantPicture = false)?.let {
                 return it.tags.toVorbisExtractedTags()
             }
             if (last) return null
@@ -310,11 +310,11 @@ internal object EmbeddedTagReader {
 
     // ---------------------------------------------------------------- OGG
 
-    private fun oggVorbisLyrics(path: String): String? = oggVorbisComment(path)?.let { it.lyrics ?: it.unsynced }
+    private fun oggVorbisLyrics(path: String): String? = oggVorbisComment(path, wantPicture = false)?.let { it.lyrics ?: it.unsynced }
 
-    private fun oggPicture(path: String): ByteArray? = oggVorbisComment(path)?.picture
+    private fun oggPicture(path: String): ByteArray? = oggVorbisComment(path, wantPicture = true)?.picture
 
-    private fun oggExtractedTags(path: String): EmbeddedTrackTags? = oggVorbisComment(path)?.tags?.toVorbisExtractedTags()
+    private fun oggExtractedTags(path: String): EmbeddedTrackTags? = oggVorbisComment(path, wantPicture = false)?.tags?.toVorbisExtractedTags()
 
     /**
      * Parses the comment header of an Opus ("OpusHead" + "OpusTags") or Vorbis
@@ -322,15 +322,17 @@ internal object EmbeddedTagReader {
      * the Ogg page structure first: large comment packets (embedded artwork,
      * long lyrics) span many pages, and each page boundary interleaves a page
      * header that a flat byte scan would splice into the comment data.
+     * Picture entries (almost all of a typical packet) are decoded only when
+     * [wantPicture] is set.
      */
-    private fun oggVorbisComment(path: String): VorbisComment? {
+    private fun oggVorbisComment(path: String, wantPicture: Boolean): VorbisComment? {
         val (identification, comment) = File(path).inputStream().buffered().use { oggHeaderPackets(it) } ?: return null
         val magicSize = when {
             identification.startsWith(OpusHeadMagic) && comment.startsWith(OpusTagsMagic) -> OpusTagsMagic.size
             identification.startsWith(VorbisIdMagic) && comment.startsWith(VorbisCommentMagic) -> VorbisCommentMagic.size
             else -> return null
         }
-        return comment.copyOfRange(magicSize, comment.size).vorbisComment()
+        return comment.vorbisComment(magicSize, comment.size, wantPicture)
     }
 
     /**
@@ -382,40 +384,50 @@ internal object EmbeddedTagReader {
      *  every key=value pair (first occurrence per key) for callers that need other fields. */
     private class VorbisComment(val lyrics: String?, val unsynced: String?, val picture: ByteArray?, val tags: Map<String, String>)
 
-    /** Vorbis-comment block: vendor (LE), vendor data, count (LE), then "key=value" pairs. */
-    private fun ByteArray.vorbisComment(): VorbisComment? {
-        if (size < 8) return null
-        var pos = 0
+    /**
+     * Vorbis-comment block in [start]..[end]: vendor (LE), vendor data, count (LE), then
+     * "key=value" pairs. Keys are read in place; `METADATA_BLOCK_PICTURE` values are
+     * skipped (not copied, decoded or kept in [VorbisComment.tags]) unless [wantPicture].
+     */
+    private fun ByteArray.vorbisComment(start: Int, end: Int, wantPicture: Boolean): VorbisComment? {
+        if (end - start < 8) return null
+        var pos = start
         val vendorLength = readUInt32LE(pos); pos += 4
-        if (vendorLength < 0 || pos + vendorLength > size) return null
+        if (vendorLength < 0 || pos + vendorLength > end) return null
         pos += vendorLength
-        if (pos + 4 > size) return null
+        if (pos + 4 > end) return null
         val count = readUInt32LE(pos).coerceIn(0, 4096); pos += 4
         var lyrics: String? = null
         var unsynced: String? = null
         var picture: ByteArray? = null
         val tags = linkedMapOf<String, String>()
         repeat(count) {
-            if (pos + 4 > size) return@repeat
+            if (pos + 4 > end) return@repeat
             val length = readUInt32LE(pos); pos += 4
-            if (length < 0 || pos + length > size) {
-                pos = size
+            if (length < 0 || pos + length > end) {
+                pos = end
                 return@repeat
             }
-            val entry = copyOfRange(pos, pos + length)
-            pos += length
-            val equals = entry.indexOf('='.code.toByte())
-            if (equals > 0) {
-                val key = String(entry, 0, equals, Charsets.ISO_8859_1).trim().uppercase()
+            val entryStart = pos
+            val entryEnd = pos + length
+            pos = entryEnd
+            val equals = indexOfByte('='.code.toByte(), entryStart, entryEnd)
+            if (equals > entryStart) {
+                val key = String(this, entryStart, equals - entryStart, Charsets.ISO_8859_1).trim().uppercase()
+                if (key == "METADATA_BLOCK_PICTURE") {
+                    if (wantPicture && picture == null) {
+                        picture = String(this, equals + 1, entryEnd - equals - 1, Charsets.ISO_8859_1).decodePictureBlock()
+                    }
+                    return@repeat
+                }
                 // Values are UTF-8 in the Vorbis-comment spec; decode separately so
                 // non-Latin lyrics (e.g. Korean) survive past the ASCII key scan.
-                val entryValue = String(entry, equals + 1, entry.size - equals - 1, Charsets.UTF_8)
+                val entryValue = String(this, equals + 1, entryEnd - equals - 1, Charsets.UTF_8)
                 when (key) {
                     // LYRICS and SYNCEDLYRICS (e.g. written by Mp3tag) are both treated as
                     // synced text and take priority over UNSYNCEDLYRICS below.
                     "LYRICS", "SYNCEDLYRICS" -> if (lyrics == null) lyrics = entryValue
                     "UNSYNCEDLYRICS" -> if (unsynced == null) unsynced = entryValue
-                    "METADATA_BLOCK_PICTURE" -> if (picture == null) picture = entryValue.decodePictureBlock()
                 }
                 if (key.isNotEmpty() && key !in tags) tags[key] = entryValue
             }
@@ -439,7 +451,11 @@ internal object EmbeddedTagReader {
     }
 
     /** `METADATA_BLOCK_PICTURE` values are base64-encoded FLAC-style pictures (RFC 7845). */
+    /** Test-only: how many `METADATA_BLOCK_PICTURE` values have been base64-decoded. */
+    internal val pictureDecodeCount = java.util.concurrent.atomic.AtomicInteger()
+
     private fun String.decodePictureBlock(): ByteArray? = try {
+        pictureDecodeCount.incrementAndGet()
         val base64 = trim()
         if (base64.isBlank()) null else java.util.Base64.getDecoder().decode(base64).flacPicturePayload()
     } catch (_: IllegalArgumentException) {
@@ -1135,7 +1151,7 @@ private fun ByteArray.readUInt64BE(offset: Int): Long {
     return value
 }
 
-private fun ByteArray.indexOfByte(element: Byte, startIndex: Int): Int {
-    for (pos in startIndex until size) if (this[pos] == element) return pos
+private fun ByteArray.indexOfByte(element: Byte, startIndex: Int, endIndex: Int = size): Int {
+    for (pos in startIndex until endIndex) if (this[pos] == element) return pos
     return -1
 }
