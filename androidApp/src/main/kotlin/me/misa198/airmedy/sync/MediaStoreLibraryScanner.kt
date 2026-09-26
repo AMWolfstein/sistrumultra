@@ -17,6 +17,9 @@ import java.io.File
 import java.security.MessageDigest
 import java.text.Normalizer
 import java.time.Instant
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import me.misa198.airmedy.library.LocalAlbumRef
 import me.misa198.airmedy.library.LocalArtistRef
 import me.misa198.airmedy.library.LocalComposer
@@ -231,8 +234,21 @@ internal class MediaStoreLibraryScanner(
             }
         }
 
-        val artwork = albumRepresentatives.mapNotNull { (key, candidate) ->
-            copyArtworkOrReuse(key, candidate, prior.artworkByArtworkKey[albumArtworkKey(key)])
+        // Albums are independent (each writes its own <albumKey>.jpg), so their covers are
+        // extracted on a few threads; results keep the album order.
+        val artworkPool = Executors.newFixedThreadPool(ArtworkParallelism)
+        val artwork = try {
+            albumRepresentatives.map { (key, candidate) ->
+                artworkPool.submit(Callable { copyArtworkOrReuse(key, candidate, prior.artworkByArtworkKey[albumArtworkKey(key)]) })
+            }.mapNotNull { future ->
+                try {
+                    future.get()
+                } catch (e: ExecutionException) {
+                    throw e.cause ?: e
+                }
+            }
+        } finally {
+            artworkPool.shutdownNow()
         }
         val sorted = tracks.sortedWith(
             compareBy<LocalTrack> { it.album.title.lowercase() }
@@ -473,6 +489,10 @@ internal class MediaStoreLibraryScanner(
         const val SortOrder = "${MediaStore.Audio.Media.ALBUM} COLLATE NOCASE, ${MediaStore.Audio.Media.DISC_NUMBER}, ${MediaStore.Audio.Media.TRACK}, ${MediaStore.Audio.Media.TITLE} COLLATE NOCASE"
         val EmbeddedThumbnailRequestSize = Size(1, 1)
         val ArtworkTargetSize = Size(1024, 1024)
+
+        /** Covers extracted at once in a full scan. Each can hold a decoded bitmap of up
+         *  to ~16 MB (2048 px ARGB), so this stays small against a 384 MB heap. */
+        const val ArtworkParallelism = 4
     }
 }
 
